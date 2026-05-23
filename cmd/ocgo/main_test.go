@@ -242,6 +242,63 @@ func TestRawChatStreamRequestsUsage(t *testing.T) {
 	}
 }
 
+func TestNormalizeReasoningEffort(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{in: "minimal", want: "minimal"},
+		{in: "0", want: "minimal"},
+		{in: "low", want: "low"},
+		{in: "1", want: "low"},
+		{in: "medium", want: "medium"},
+		{in: "2", want: "medium"},
+		{in: "high", want: "high"},
+		{in: "xhigh", want: "high"},
+		{in: "max", want: "high"},
+	} {
+		if got := normalizeReasoningEffort(tc.in); got != tc.want {
+			t.Fatalf("normalizeReasoningEffort(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestRawChatReasoningEffortPassThrough(t *testing.T) {
+	body, err := prepareChatBody([]byte(`{"model":"glm-5.1","reasoning":{"effort":"xhigh"},"thinking":{"type":"enabled"},"output_config":{"reasoning":{"depth":2}},"messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort = %v, want high in %s", req["reasoning_effort"], string(body))
+	}
+	for _, key := range []string{"reasoning", "thinking", "effort", "level", "depth", "output_config"} {
+		if _, ok := req[key]; ok {
+			t.Fatalf("%s should be stripped from forwarded chat body: %s", key, string(body))
+		}
+	}
+}
+
+func TestReasoningEffortExtraction(t *testing.T) {
+	for _, tc := range []struct {
+		raw  json.RawMessage
+		want string
+	}{
+		{raw: []byte(`"low"`), want: "low"},
+		{raw: []byte(`3`), want: "high"},
+		{raw: []byte(`{"level":"medium"}`), want: "medium"},
+		{raw: []byte(`{"type":"enabled"}`), want: "high"},
+		{raw: []byte(`{"reasoning":{"depth":1}}`), want: "low"},
+	} {
+		if got := downstreamReasoningEffort(tc.raw); got != tc.want {
+			t.Fatalf("downstreamReasoningEffort(%s) = %q, want %q", string(tc.raw), got, tc.want)
+		}
+	}
+}
+
 func TestConvertedStreamingRequestsAskForUsage(t *testing.T) {
 	anthropic := convertRequest(AnthropicRequest{Model: "kimi-k2.6", Stream: true, Messages: []AMessage{{Role: "user", Content: []byte(`hello`)}}})
 	if anthropic.StreamOptions == nil || !anthropic.StreamOptions.IncludeUsage {
@@ -254,6 +311,17 @@ func TestConvertedStreamingRequestsAskForUsage(t *testing.T) {
 	plain := responsesToChat(ResponsesRequest{Model: "kimi-k2.6", Input: []byte(`"hello"`)})
 	if plain.StreamOptions != nil {
 		t.Fatalf("non-streaming conversion should not set stream options: %+v", plain.StreamOptions)
+	}
+}
+
+func TestConvertedRequestsForwardReasoningEffort(t *testing.T) {
+	anthropic := convertRequest(AnthropicRequest{Model: "glm-5.1", Reasoning: []byte(`{"effort":"high"}`), Messages: []AMessage{{Role: "user", Content: []byte(`[{"type":"text","text":"hello"}]`)}}})
+	if anthropic.ReasoningEffort != "high" {
+		t.Fatalf("anthropic reasoning effort = %q, want high", anthropic.ReasoningEffort)
+	}
+	responses := responsesToChat(ResponsesRequest{Model: "glm-5.1", OutputConfig: []byte(`{"reasoning":{"depth":2}}`), Input: []byte(`[{"type":"message","role":"user","content":"hello"}]`)})
+	if responses.ReasoningEffort != "medium" {
+		t.Fatalf("responses reasoning effort = %q, want medium", responses.ReasoningEffort)
 	}
 }
 

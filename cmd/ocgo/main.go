@@ -38,14 +38,21 @@ type Config struct {
 }
 
 type AnthropicRequest struct {
-	Model       string          `json:"model"`
-	MaxTokens   int             `json:"max_tokens"`
-	System      json.RawMessage `json:"system,omitempty"`
-	Messages    []AMessage      `json:"messages"`
-	Stream      bool            `json:"stream,omitempty"`
-	Tools       []ATool         `json:"tools,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	TopP        *float64        `json:"top_p,omitempty"`
+	Model           string          `json:"model"`
+	MaxTokens       int             `json:"max_tokens"`
+	System          json.RawMessage `json:"system,omitempty"`
+	Messages        []AMessage      `json:"messages"`
+	Stream          bool            `json:"stream,omitempty"`
+	Tools           []ATool         `json:"tools,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	TopP            *float64        `json:"top_p,omitempty"`
+	Thinking        json.RawMessage `json:"thinking,omitempty"`
+	Reasoning       json.RawMessage `json:"reasoning,omitempty"`
+	ReasoningEffort json.RawMessage `json:"reasoning_effort,omitempty"`
+	Effort          json.RawMessage `json:"effort,omitempty"`
+	Level           json.RawMessage `json:"level,omitempty"`
+	Depth           json.RawMessage `json:"depth,omitempty"`
+	OutputConfig    json.RawMessage `json:"output_config,omitempty"`
 }
 
 type AMessage struct {
@@ -60,14 +67,15 @@ type ATool struct {
 }
 
 type OAIRequest struct {
-	Model         string            `json:"model"`
-	Messages      []OAIMessage      `json:"messages"`
-	Stream        bool              `json:"stream,omitempty"`
-	StreamOptions *OAIStreamOptions `json:"stream_options,omitempty"`
-	MaxTokens     int               `json:"max_tokens,omitempty"`
-	Temperature   *float64          `json:"temperature,omitempty"`
-	TopP          *float64          `json:"top_p,omitempty"`
-	Tools         []OAITool         `json:"tools,omitempty"`
+	Model           string            `json:"model"`
+	Messages        []OAIMessage      `json:"messages"`
+	Stream          bool              `json:"stream,omitempty"`
+	StreamOptions   *OAIStreamOptions `json:"stream_options,omitempty"`
+	MaxTokens       int               `json:"max_tokens,omitempty"`
+	Temperature     *float64          `json:"temperature,omitempty"`
+	TopP            *float64          `json:"top_p,omitempty"`
+	Tools           []OAITool         `json:"tools,omitempty"`
+	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 }
 
 type OAIStreamOptions struct {
@@ -75,14 +83,21 @@ type OAIStreamOptions struct {
 }
 
 type ResponsesRequest struct {
-	Model        string          `json:"model"`
-	Input        json.RawMessage `json:"input"`
-	Instructions string          `json:"instructions,omitempty"`
-	Stream       bool            `json:"stream,omitempty"`
-	MaxTokens    int             `json:"max_output_tokens,omitempty"`
-	Temperature  *float64        `json:"temperature,omitempty"`
-	TopP         *float64        `json:"top_p,omitempty"`
-	Tools        []ResponseTool  `json:"tools,omitempty"`
+	Model           string          `json:"model"`
+	Input           json.RawMessage `json:"input"`
+	Instructions    string          `json:"instructions,omitempty"`
+	Stream          bool            `json:"stream,omitempty"`
+	MaxTokens       int             `json:"max_output_tokens,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	TopP            *float64        `json:"top_p,omitempty"`
+	Tools           []ResponseTool  `json:"tools,omitempty"`
+	Thinking        json.RawMessage `json:"thinking,omitempty"`
+	Reasoning       json.RawMessage `json:"reasoning,omitempty"`
+	ReasoningEffort json.RawMessage `json:"reasoning_effort,omitempty"`
+	Effort          json.RawMessage `json:"effort,omitempty"`
+	Level           json.RawMessage `json:"level,omitempty"`
+	Depth           json.RawMessage `json:"depth,omitempty"`
+	OutputConfig    json.RawMessage `json:"output_config,omitempty"`
 }
 
 type ResponseTool struct {
@@ -488,6 +503,9 @@ func prepareChatBody(body []byte) ([]byte, error) {
 		return body, nil
 	}
 	changed := requestStreamingUsage(req)
+	if applyRawChatReasoningEffort(req) {
+		changed = true
+	}
 	model, _ := req["model"].(string)
 	if rawChatBodyHasImages(req) {
 		if !modelSupportsImages(model) {
@@ -503,6 +521,100 @@ func prepareChatBody(body []byte) ([]byte, error) {
 		return body, nil
 	}
 	return out, nil
+}
+
+func applyRawChatReasoningEffort(req map[string]any) bool {
+	effort := rawChatReasoningEffort(req)
+	changed := false
+	if effort != "" {
+		current, _ := req["reasoning_effort"].(string)
+		if current != effort {
+			req["reasoning_effort"] = effort
+			changed = true
+		}
+	}
+	for _, key := range []string{"reasoning", "thinking", "effort", "level", "depth", "output_config"} {
+		if _, ok := req[key]; ok {
+			delete(req, key)
+			changed = true
+		}
+	}
+	return changed
+}
+
+func rawChatReasoningEffort(req map[string]any) string {
+	for _, key := range []string{"reasoning_effort", "reasoning", "thinking", "output_config", "effort", "level", "depth"} {
+		if effort := reasoningEffortFromAny(req[key]); effort != "" {
+			return normalizeReasoningEffort(effort)
+		}
+	}
+	return ""
+}
+
+func downstreamReasoningEffort(values ...json.RawMessage) string {
+	for _, raw := range values {
+		if effort := reasoningEffortFromRaw(raw); effort != "" {
+			return normalizeReasoningEffort(effort)
+		}
+	}
+	return ""
+}
+
+func reasoningEffortFromRaw(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return ""
+	}
+	return reasoningEffortFromAny(v)
+}
+
+func reasoningEffortFromAny(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		return formatReasoningNumber(t)
+	case map[string]any:
+		for _, key := range []string{"effort", "level", "depth", "reasoning_effort"} {
+			if effort := reasoningEffortFromAny(t[key]); effort != "" {
+				return effort
+			}
+		}
+		if typ, _ := t["type"].(string); strings.EqualFold(strings.TrimSpace(typ), "enabled") {
+			return "high"
+		}
+		for _, key := range []string{"reasoning", "thinking", "output_config"} {
+			if effort := reasoningEffortFromAny(t[key]); effort != "" {
+				return effort
+			}
+		}
+	}
+	return ""
+}
+
+func formatReasoningNumber(n float64) string {
+	if n == float64(int64(n)) {
+		return strconv.FormatInt(int64(n), 10)
+	}
+	return strconv.FormatFloat(n, 'f', -1, 64)
+}
+
+func normalizeReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "0", "minimal", "min", "none", "off", "disabled", "false":
+		return "minimal"
+	case "1", "low", "light":
+		return "low"
+	case "2", "medium", "med", "normal", "default":
+		return "medium"
+	case "3", "4", "high", "xhigh", "max", "maximum", "deep", "true", "enabled":
+		return "high"
+	default:
+		return strings.TrimSpace(effort)
+	}
 }
 
 func requestStreamingUsage(req map[string]any) bool {
@@ -586,7 +698,7 @@ func convertRequest(ar AnthropicRequest) OAIRequest {
 	if model == "" || strings.HasPrefix(model, "claude-") {
 		model = "kimi-k2.6"
 	}
-	out := OAIRequest{Model: model, Stream: ar.Stream, StreamOptions: streamUsageOptions(ar.Stream), MaxTokens: ar.MaxTokens, Temperature: ar.Temperature, TopP: ar.TopP}
+	out := OAIRequest{Model: model, Stream: ar.Stream, StreamOptions: streamUsageOptions(ar.Stream), MaxTokens: ar.MaxTokens, Temperature: ar.Temperature, TopP: ar.TopP, ReasoningEffort: downstreamReasoningEffort(ar.Reasoning, ar.Thinking, ar.OutputConfig, ar.ReasoningEffort, ar.Effort, ar.Level, ar.Depth)}
 	if sys := systemText(ar.System); sys != "" {
 		out.Messages = append(out.Messages, OAIMessage{Role: "system", Content: sys})
 	}
@@ -604,7 +716,7 @@ func responsesToChat(rr ResponsesRequest) OAIRequest {
 	if model == "" {
 		model = "kimi-k2.6"
 	}
-	out := OAIRequest{Model: model, Stream: rr.Stream, StreamOptions: streamUsageOptions(rr.Stream), MaxTokens: rr.MaxTokens, Temperature: rr.Temperature, TopP: rr.TopP}
+	out := OAIRequest{Model: model, Stream: rr.Stream, StreamOptions: streamUsageOptions(rr.Stream), MaxTokens: rr.MaxTokens, Temperature: rr.Temperature, TopP: rr.TopP, ReasoningEffort: downstreamReasoningEffort(rr.Reasoning, rr.Thinking, rr.OutputConfig, rr.ReasoningEffort, rr.Effort, rr.Level, rr.Depth)}
 	if rr.Instructions != "" {
 		out.Messages = append(out.Messages, OAIMessage{Role: "system", Content: rr.Instructions})
 	}
