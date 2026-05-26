@@ -26,6 +26,7 @@ const (
 	defaultHost      = "127.0.0.1"
 	defaultPort      = 3456
 	openAIURL        = "https://opencode.ai/zen/go/v1/chat/completions"
+	anthropicURL     = "https://opencode.ai/zen/go/v1/messages"
 	codexProfileName = "ocgo-launch"
 )
 
@@ -199,11 +200,24 @@ func listCmd() *cobra.Command {
 }
 
 func knownModelIDs() []string {
-	return []string{"glm-5.1", "glm-5", "kimi-k2.6", "kimi-k2.5", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni", "minimax-m2.7", "minimax-m2.5", "deepseek-v4-pro", "deepseek-v4-flash", "qwen3.6-plus", "qwen3.5-plus"}
+	return []string{"glm-5.1", "glm-5", "kimi-k2.6", "kimi-k2.5", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni", "minimax-m2.7", "minimax-m2.5", "deepseek-v4-pro", "deepseek-v4-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus"}
+}
+
+func modelID(model string) string {
+	return strings.TrimPrefix(strings.TrimSpace(model), "opencode-go/")
+}
+
+func modelUsesAnthropicEndpoint(model string) bool {
+	switch modelID(model) {
+	case "minimax-m2.7", "minimax-m2.5", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus":
+		return true
+	default:
+		return false
+	}
 }
 
 func modelSupportsImages(model string) bool {
-	switch model {
+	switch modelID(model) {
 	case "kimi-k2.6", "kimi-k2.5", "mimo-v2-omni":
 		return true
 	default:
@@ -384,6 +398,20 @@ func proxyMessages(w http.ResponseWriter, r *http.Request, cfg Config) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	if modelUsesAnthropicEndpoint(ar.Model) {
+		ar.Model = modelID(ar.Model)
+		ensureAnthropicRequestDefaults(&ar)
+		resp, err := forwardAnthropic(r.Context(), cfg, ar)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		copyHeaders(w.Header(), resp.Header)
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+		return
+	}
 	or := convertRequest(ar)
 	if err := validateImageSupport(or); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -430,6 +458,31 @@ func proxyChatCompletions(w http.ResponseWriter, r *http.Request, cfg Config) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	var or OAIRequest
+	if json.Unmarshal(body, &or) == nil && modelUsesAnthropicEndpoint(or.Model) {
+		or.Model = modelID(or.Model)
+		if err := validateImageSupport(or); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp, err := forwardAnthropic(r.Context(), cfg, chatToAnthropic(or))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+		if or.Stream {
+			streamChatCompletionsFromAnthropic(w, resp.Body, or.Model)
+			return
+		}
+		writeChatCompletionsResponseFromAnthropic(w, resp.Body, or.Model)
+		return
+	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, openAIURL, bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -463,6 +516,26 @@ func proxyResponses(w http.ResponseWriter, r *http.Request, cfg Config) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if modelUsesAnthropicEndpoint(or.Model) {
+		or.Model = modelID(or.Model)
+		resp, err := forwardAnthropic(r.Context(), cfg, chatToAnthropic(or))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+		if rr.Stream {
+			streamResponsesFromAnthropic(w, resp.Body, or.Model)
+			return
+		}
+		writeResponsesResponseFromAnthropic(w, resp.Body, or.Model)
+		return
+	}
 	body, _ := json.Marshal(or)
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, openAIURL, bytes.NewReader(body))
 	if err != nil {
@@ -494,6 +567,32 @@ func copyHeaders(dst, src http.Header) {
 		for _, v := range vals {
 			dst.Add(k, v)
 		}
+	}
+}
+
+func forwardAnthropic(ctx context.Context, cfg Config, ar AnthropicRequest) (*http.Response, error) {
+	ensureAnthropicRequestDefaults(&ar)
+	body, err := json.Marshal(ar)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-API-Key", cfg.APIKey)
+	req.Header.Set("Anthropic-Version", "2023-06-01")
+	req.Header.Set("Content-Type", "application/json")
+	return (&http.Client{Timeout: 10 * time.Minute}).Do(req)
+}
+
+func ensureAnthropicRequestDefaults(ar *AnthropicRequest) {
+	ar.Model = modelID(ar.Model)
+	if ar.Model == "" || strings.HasPrefix(ar.Model, "claude-") {
+		ar.Model = "kimi-k2.6"
+	}
+	if ar.MaxTokens == 0 {
+		ar.MaxTokens = 4096
 	}
 }
 
@@ -727,6 +826,190 @@ func responsesToChat(rr ResponsesRequest) OAIRequest {
 		}
 	}
 	return out
+}
+
+func chatToAnthropic(or OAIRequest) AnthropicRequest {
+	model := modelID(or.Model)
+	if model == "" {
+		model = "kimi-k2.6"
+	}
+	out := AnthropicRequest{Model: model, MaxTokens: or.MaxTokens, Stream: or.Stream, Temperature: or.Temperature, TopP: or.TopP}
+	if out.MaxTokens == 0 {
+		out.MaxTokens = 4096
+	}
+	var system []string
+	for _, m := range or.Messages {
+		role := m.Role
+		if role == "developer" {
+			role = "system"
+		}
+		switch role {
+		case "system":
+			if text := openAIContentText(m.Content); text != "" {
+				system = append(system, text)
+			}
+		case "tool":
+			out.Messages = append(out.Messages, AMessage{Role: "user", Content: marshalJSON([]map[string]any{{"type": "tool_result", "tool_use_id": m.ToolCallID, "content": openAIContentText(m.Content)}})})
+		case "assistant":
+			out.Messages = append(out.Messages, AMessage{Role: "assistant", Content: assistantContentToAnthropic(m)})
+		default:
+			if role == "" {
+				role = "user"
+			}
+			out.Messages = append(out.Messages, AMessage{Role: role, Content: openAIContentToAnthropic(m.Content)})
+		}
+	}
+	if len(system) > 0 {
+		out.System = marshalJSON(strings.Join(system, "\n\n"))
+	}
+	for _, t := range or.Tools {
+		if t.Type == "function" || t.Function.Name != "" {
+			out.Tools = append(out.Tools, ATool{Name: t.Function.Name, Description: t.Function.Description, InputSchema: t.Function.Parameters})
+		}
+	}
+	return out
+}
+
+func assistantContentToAnthropic(m OAIMessage) json.RawMessage {
+	blocks := anthropicBlocksFromOpenAIContent(m.Content)
+	for _, call := range m.ToolCalls {
+		input := any(map[string]any{})
+		if strings.TrimSpace(call.Function.Arguments) != "" {
+			var parsed any
+			if json.Unmarshal([]byte(call.Function.Arguments), &parsed) == nil {
+				input = parsed
+			} else {
+				input = call.Function.Arguments
+			}
+		}
+		blocks = append(blocks, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": input})
+	}
+	return marshalJSON(blocks)
+}
+
+func openAIContentToAnthropic(content any) json.RawMessage {
+	if text, ok := content.(string); ok {
+		return marshalJSON(text)
+	}
+	return marshalJSON(anthropicBlocksFromOpenAIContent(content))
+}
+
+func anthropicBlocksFromOpenAIContent(content any) []map[string]any {
+	switch v := content.(type) {
+	case nil:
+		return []map[string]any{{"type": "text", "text": ""}}
+	case string:
+		if v == "" {
+			return nil
+		}
+		return []map[string]any{{"type": "text", "text": v}}
+	case []OAIContentPart:
+		var out []map[string]any
+		for _, part := range v {
+			out = appendAnthropicPart(out, part.Type, part.Text, part.ImageURL)
+		}
+		return out
+	case []any:
+		var out []map[string]any
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			typ, _ := m["type"].(string)
+			text, _ := m["text"].(string)
+			if text == "" {
+				text, _ = m["output_text"].(string)
+			}
+			out = appendAnthropicPart(out, typ, text, imageURLFromAny(m["image_url"], m["url"]))
+		}
+		return out
+	default:
+		return []map[string]any{{"type": "text", "text": fmt.Sprint(v)}}
+	}
+}
+
+func appendAnthropicPart(out []map[string]any, typ, text string, image *OAIImageURL) []map[string]any {
+	switch typ {
+	case "text", "input_text", "output_text":
+		if text != "" {
+			out = append(out, map[string]any{"type": "text", "text": text})
+		}
+	case "image_url", "input_image":
+		if image != nil && image.URL != "" {
+			out = append(out, map[string]any{"type": "image", "source": anthropicImageSource(image.URL)})
+		}
+	}
+	return out
+}
+
+func imageURLFromAny(imageValue, urlValue any) *OAIImageURL {
+	if s, ok := imageValue.(string); ok && s != "" {
+		return &OAIImageURL{URL: s}
+	}
+	if m, ok := imageValue.(map[string]any); ok {
+		if s, _ := m["url"].(string); s != "" {
+			return &OAIImageURL{URL: s}
+		}
+	}
+	if s, ok := urlValue.(string); ok && s != "" {
+		return &OAIImageURL{URL: s}
+	}
+	return nil
+}
+
+func anthropicImageSource(url string) map[string]any {
+	if strings.HasPrefix(url, "data:") {
+		mediaType := "image/png"
+		data := url
+		if rest, ok := strings.CutPrefix(url, "data:"); ok {
+			if header, body, found := strings.Cut(rest, ","); found {
+				data = body
+				if mt, _, found := strings.Cut(header, ";"); found && mt != "" {
+					mediaType = mt
+				}
+			}
+		}
+		return map[string]any{"type": "base64", "media_type": mediaType, "data": data}
+	}
+	return map[string]any{"type": "url", "url": url}
+}
+
+func openAIContentText(content any) string {
+	switch v := content.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case []OAIContentPart:
+		var b strings.Builder
+		for _, part := range v {
+			b.WriteString(part.Text)
+		}
+		return b.String()
+	case []any:
+		var b strings.Builder
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, _ := m["text"].(string); text != "" {
+				b.WriteString(text)
+			}
+			if text, _ := m["output_text"].(string); text != "" {
+				b.WriteString(text)
+			}
+		}
+		return b.String()
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func marshalJSON(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
 }
 
 func streamUsageOptions(streaming bool) *OAIStreamOptions {
@@ -1084,6 +1367,37 @@ func usageFromJSON(raw json.RawMessage) tokenUsage {
 	return usageFromFields(fields)
 }
 
+func usageFromAnyMap(v any) tokenUsage {
+	fields, ok := v.(map[string]any)
+	if !ok {
+		return tokenUsage{}
+	}
+	return usageFromFields(fields)
+}
+
+func mergeUsage(a, b tokenUsage) tokenUsage {
+	if !b.Present {
+		return a
+	}
+	a.Present = true
+	if b.InputTokens != 0 {
+		a.InputTokens = b.InputTokens
+	}
+	if b.OutputTokens != 0 {
+		a.OutputTokens = b.OutputTokens
+	}
+	if b.TotalTokens != 0 {
+		a.TotalTokens = b.TotalTokens
+	}
+	if b.CachedInputTokens != 0 {
+		a.CachedInputTokens = b.CachedInputTokens
+	}
+	if a.TotalTokens == 0 && (a.InputTokens > 0 || a.OutputTokens > 0) {
+		a.TotalTokens = a.InputTokens + a.OutputTokens
+	}
+	return a
+}
+
 func usageFromFields(fields map[string]any) tokenUsage {
 	if len(fields) == 0 {
 		return tokenUsage{}
@@ -1122,6 +1436,20 @@ func intField(fields map[string]any, name string) int {
 	return 0
 }
 
+func intFromAny(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	default:
+		return 0
+	}
+}
+
 func cachedTokens(fields map[string]any) int {
 	for _, key := range []string{"prompt_tokens_details", "input_tokens_details"} {
 		if nested, ok := fields[key].(map[string]any); ok {
@@ -1129,6 +1457,9 @@ func cachedTokens(fields map[string]any) int {
 				return n
 			}
 		}
+	}
+	if n := intField(fields, "cache_read_input_tokens"); n > 0 {
+		return n
 	}
 	return intField(fields, "cached_tokens")
 }
@@ -1156,6 +1487,14 @@ func responsesUsage(u tokenUsage) map[string]any {
 	usage := map[string]any{"input_tokens": u.InputTokens, "output_tokens": u.OutputTokens, "total_tokens": u.TotalTokens}
 	if u.CachedInputTokens > 0 {
 		usage["input_tokens_details"] = map[string]int{"cached_tokens": u.CachedInputTokens}
+	}
+	return usage
+}
+
+func openAIUsage(u tokenUsage) map[string]any {
+	usage := map[string]any{"prompt_tokens": u.InputTokens, "completion_tokens": u.OutputTokens, "total_tokens": u.TotalTokens}
+	if u.CachedInputTokens > 0 {
+		usage["prompt_tokens_details"] = map[string]int{"cached_tokens": u.CachedInputTokens}
 	}
 	return usage
 }
@@ -1287,6 +1626,272 @@ func writeAnthropicResponse(w http.ResponseWriter, body io.Reader, model string)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"id": "ocgo", "type": "message", "role": "assistant", "model": model, "content": []map[string]string{{"type": "text", "text": text}}, "stop_reason": "end_turn", "usage": anthropicUsage(usageFromJSON(v.Usage))})
+}
+
+type anthropicParsedResponse struct {
+	Text      string
+	ToolCalls []OAIToolCall
+	Usage     tokenUsage
+}
+
+func parseAnthropicResponse(body io.Reader) anthropicParsedResponse {
+	var v struct {
+		Content []struct {
+			Type  string          `json:"type"`
+			Text  string          `json:"text"`
+			ID    string          `json:"id"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
+		} `json:"content"`
+		Usage json.RawMessage `json:"usage"`
+	}
+	_ = json.NewDecoder(body).Decode(&v)
+	out := anthropicParsedResponse{Usage: usageFromJSON(v.Usage)}
+	var text strings.Builder
+	for i, block := range v.Content {
+		switch block.Type {
+		case "text":
+			text.WriteString(block.Text)
+		case "tool_use":
+			id := block.ID
+			if id == "" {
+				id = fmt.Sprintf("call_%d", i)
+			}
+			args := "{}"
+			if len(block.Input) > 0 && string(block.Input) != "null" {
+				args = string(block.Input)
+			}
+			out.ToolCalls = append(out.ToolCalls, OAIToolCall{ID: id, Type: "function", Function: OAICallFunction{Name: block.Name, Arguments: args}})
+		}
+	}
+	out.Text = text.String()
+	return out
+}
+
+func writeChatCompletionsResponseFromAnthropic(w http.ResponseWriter, body io.Reader, model string) {
+	parsed := parseAnthropicResponse(body)
+	msg := map[string]any{"role": "assistant", "content": parsed.Text}
+	finishReason := "stop"
+	if len(parsed.ToolCalls) > 0 {
+		msg["tool_calls"] = parsed.ToolCalls
+		finishReason = "tool_calls"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"id": "chatcmpl_ocgo", "object": "chat.completion", "created": time.Now().Unix(), "model": model, "choices": []map[string]any{{"index": 0, "message": msg, "finish_reason": finishReason}}, "usage": openAIUsage(parsed.Usage)})
+}
+
+func writeResponsesResponseFromAnthropic(w http.ResponseWriter, body io.Reader, model string) {
+	parsed := parseAnthropicResponse(body)
+	var output []any
+	if parsed.Text != "" || len(parsed.ToolCalls) == 0 {
+		output = append(output, map[string]any{"id": "msg_ocgo", "type": "message", "role": "assistant", "content": []map[string]string{{"type": "output_text", "text": parsed.Text}}})
+	}
+	for _, call := range parsed.ToolCalls {
+		output = append(output, map[string]any{"id": call.ID, "type": "function_call", "call_id": call.ID, "name": call.Function.Name, "arguments": call.Function.Arguments})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"id": "resp_ocgo", "object": "response", "created_at": time.Now().Unix(), "model": model, "status": "completed", "output": output, "usage": responsesUsage(parsed.Usage)})
+}
+
+func streamChatCompletionsFromAnthropic(w http.ResponseWriter, body io.Reader, model string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	flusher, _ := w.(http.Flusher)
+	writeChatCompletionChunk(w, model, map[string]any{"role": "assistant"}, nil)
+	tools := map[int]streamedResponseToolCall{}
+	readSSE(body, func(_ string, data []byte) bool {
+		var v map[string]any
+		if json.Unmarshal(data, &v) != nil {
+			return true
+		}
+		typ, _ := v["type"].(string)
+		switch typ {
+		case "content_block_start":
+			idx := intFromAny(v["index"])
+			block, _ := v["content_block"].(map[string]any)
+			if blockType, _ := block["type"].(string); blockType == "tool_use" {
+				id, _ := block["id"].(string)
+				name, _ := block["name"].(string)
+				if id == "" {
+					id = fmt.Sprintf("call_%d", idx)
+				}
+				tools[idx] = streamedResponseToolCall{OutputIndex: len(tools), Call: OAIToolCall{ID: id, Type: "function", Function: OAICallFunction{Name: name}}}
+				writeChatCompletionChunk(w, model, map[string]any{"tool_calls": []map[string]any{{"index": tools[idx].OutputIndex, "id": id, "type": "function", "function": map[string]any{"name": name, "arguments": ""}}}}, nil)
+			}
+		case "content_block_delta":
+			idx := intFromAny(v["index"])
+			delta, _ := v["delta"].(map[string]any)
+			switch deltaType, _ := delta["type"].(string); deltaType {
+			case "text_delta":
+				if text, _ := delta["text"].(string); text != "" {
+					writeChatCompletionChunk(w, model, map[string]any{"content": text}, nil)
+				}
+			case "input_json_delta":
+				if tool, ok := tools[idx]; ok {
+					part, _ := delta["partial_json"].(string)
+					tool.Call.Function.Arguments += part
+					tools[idx] = tool
+					writeChatCompletionChunk(w, model, map[string]any{"tool_calls": []map[string]any{{"index": tool.OutputIndex, "function": map[string]any{"arguments": part}}}}, nil)
+				}
+			}
+		case "message_stop":
+			return false
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return true
+	})
+	finish := "stop"
+	if len(tools) > 0 {
+		finish = "tool_calls"
+	}
+	writeChatCompletionChunk(w, model, map[string]any{}, &finish)
+	fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
+func writeChatCompletionChunk(w io.Writer, model string, delta map[string]any, finishReason *string) {
+	choice := map[string]any{"index": 0, "delta": delta}
+	if finishReason != nil {
+		choice["finish_reason"] = *finishReason
+	}
+	b, _ := json.Marshal(map[string]any{"id": "chatcmpl_ocgo", "object": "chat.completion.chunk", "created": time.Now().Unix(), "model": model, "choices": []map[string]any{choice}})
+	fmt.Fprintf(w, "data: %s\n\n", b)
+}
+
+func streamResponsesFromAnthropic(w http.ResponseWriter, body io.Reader, model string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	flusher, _ := w.(http.Flusher)
+	id := "resp_ocgo"
+	writeResponseEvent(w, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": id, "object": "response", "model": model, "status": "in_progress", "output": []any{}}})
+	if flusher != nil {
+		flusher.Flush()
+	}
+	messageStarted := false
+	messageOutputIndex := -1
+	nextOutputIndex := 0
+	var text strings.Builder
+	usage := tokenUsage{}
+	blockToTool := map[int]int{}
+	var tools []streamedResponseToolCall
+	readSSE(body, func(_ string, data []byte) bool {
+		var v map[string]any
+		if json.Unmarshal(data, &v) != nil {
+			return true
+		}
+		typ, _ := v["type"].(string)
+		switch typ {
+		case "message_start":
+			if msg, _ := v["message"].(map[string]any); msg != nil {
+				usage = mergeUsage(usage, usageFromAnyMap(msg["usage"]))
+			}
+		case "content_block_start":
+			idx := intFromAny(v["index"])
+			block, _ := v["content_block"].(map[string]any)
+			switch blockType, _ := block["type"].(string); blockType {
+			case "text":
+				if !messageStarted {
+					messageStarted = true
+					messageOutputIndex = nextOutputIndex
+					nextOutputIndex++
+					writeResponseEvent(w, "response.output_item.added", map[string]any{"type": "response.output_item.added", "output_index": messageOutputIndex, "item": map[string]any{"id": "msg_ocgo", "type": "message", "role": "assistant", "content": []any{}}})
+					writeResponseEvent(w, "response.content_part.added", map[string]any{"type": "response.content_part.added", "item_id": "msg_ocgo", "output_index": messageOutputIndex, "content_index": 0, "part": map[string]any{"type": "output_text", "text": ""}})
+				}
+			case "tool_use":
+				callID, _ := block["id"].(string)
+				name, _ := block["name"].(string)
+				if callID == "" {
+					callID = fmt.Sprintf("call_%d", idx)
+				}
+				toolPos := len(tools)
+				blockToTool[idx] = toolPos
+				outputIndex := nextOutputIndex
+				nextOutputIndex++
+				tools = append(tools, streamedResponseToolCall{OutputIndex: outputIndex, Call: OAIToolCall{ID: callID, Type: "function", Function: OAICallFunction{Name: name}}})
+				writeResponseEvent(w, "response.output_item.added", map[string]any{"type": "response.output_item.added", "output_index": outputIndex, "item": map[string]any{"id": callID, "type": "function_call", "call_id": callID, "name": name, "arguments": ""}})
+			}
+		case "content_block_delta":
+			idx := intFromAny(v["index"])
+			delta, _ := v["delta"].(map[string]any)
+			switch deltaType, _ := delta["type"].(string); deltaType {
+			case "text_delta":
+				if part, _ := delta["text"].(string); part != "" {
+					if !messageStarted {
+						messageStarted = true
+						messageOutputIndex = nextOutputIndex
+						nextOutputIndex++
+						writeResponseEvent(w, "response.output_item.added", map[string]any{"type": "response.output_item.added", "output_index": messageOutputIndex, "item": map[string]any{"id": "msg_ocgo", "type": "message", "role": "assistant", "content": []any{}}})
+						writeResponseEvent(w, "response.content_part.added", map[string]any{"type": "response.content_part.added", "item_id": "msg_ocgo", "output_index": messageOutputIndex, "content_index": 0, "part": map[string]any{"type": "output_text", "text": ""}})
+					}
+					text.WriteString(part)
+					writeResponseEvent(w, "response.output_text.delta", map[string]any{"type": "response.output_text.delta", "item_id": "msg_ocgo", "output_index": messageOutputIndex, "content_index": 0, "delta": part})
+				}
+			case "input_json_delta":
+				toolPos, ok := blockToTool[idx]
+				if ok {
+					part, _ := delta["partial_json"].(string)
+					tools[toolPos].Call.Function.Arguments += part
+					writeResponseEvent(w, "response.function_call_arguments.delta", map[string]any{"type": "response.function_call_arguments.delta", "item_id": tools[toolPos].Call.ID, "output_index": tools[toolPos].OutputIndex, "delta": part})
+				}
+			}
+		case "message_delta":
+			usage = mergeUsage(usage, usageFromAnyMap(v["usage"]))
+		case "message_stop":
+			return false
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return true
+	})
+	var output []any
+	if messageStarted {
+		writeResponseEvent(w, "response.output_text.done", map[string]any{"type": "response.output_text.done", "item_id": "msg_ocgo", "output_index": messageOutputIndex, "content_index": 0, "text": text.String()})
+		writeResponseEvent(w, "response.output_item.done", map[string]any{"type": "response.output_item.done", "output_index": messageOutputIndex, "item": map[string]any{"id": "msg_ocgo", "type": "message", "role": "assistant", "content": []map[string]string{{"type": "output_text", "text": text.String()}}}})
+		output = append(output, map[string]any{"id": "msg_ocgo", "type": "message", "role": "assistant", "content": []map[string]string{{"type": "output_text", "text": text.String()}}})
+	}
+	for _, tool := range tools {
+		call := tool.Call
+		item := map[string]any{"id": call.ID, "type": "function_call", "call_id": call.ID, "name": call.Function.Name, "arguments": call.Function.Arguments}
+		writeResponseEvent(w, "response.function_call_arguments.done", map[string]any{"type": "response.function_call_arguments.done", "item_id": call.ID, "output_index": tool.OutputIndex, "arguments": call.Function.Arguments})
+		writeResponseEvent(w, "response.output_item.done", map[string]any{"type": "response.output_item.done", "output_index": tool.OutputIndex, "item": item})
+		output = append(output, item)
+	}
+	writeResponseEvent(w, "response.completed", map[string]any{"type": "response.completed", "response": map[string]any{"id": id, "object": "response", "model": model, "status": "completed", "output": output, "usage": responsesUsage(usage)}})
+}
+
+func readSSE(body io.Reader, handle func(event string, data []byte) bool) {
+	s := bufio.NewScanner(body)
+	var event string
+	var data []string
+	flush := func() bool {
+		if len(data) == 0 {
+			return true
+		}
+		payload := strings.Join(data, "\n")
+		data = nil
+		if payload == "[DONE]" {
+			return false
+		}
+		return handle(event, []byte(payload))
+	}
+	for s.Scan() {
+		line := strings.TrimRight(s.Text(), "\r")
+		if line == "" {
+			if !flush() {
+				return
+			}
+			event = ""
+			continue
+		}
+		if strings.HasPrefix(line, "event:") {
+			event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			data = append(data, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	_ = flush()
 }
 
 func streamResponses(w http.ResponseWriter, body io.Reader, model string) {

@@ -70,7 +70,7 @@ func TestWriteCodexModelCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(b)
-	for _, want := range []string{`"models"`, `"slug": "deepseek-v4-pro"`, `"context_window": 128000`, `"truncation_policy"`, `"supports_image_detail_original": false`, `"image"`} {
+	for _, want := range []string{`"models"`, `"slug": "deepseek-v4-pro"`, `"slug": "qwen3.7-max"`, `"context_window": 128000`, `"truncation_policy"`, `"supports_image_detail_original": false`, `"image"`} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("missing %q in:\n%s", want, content)
 		}
@@ -95,6 +95,31 @@ func TestCodexModelCatalogAllowsImagesForKnownVisionModels(t *testing.T) {
 		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
 			t.Fatalf("%s modalities = %+v, want %+v", tc.model, got, tc.want)
 		}
+	}
+}
+
+func TestAnthropicEndpointModels(t *testing.T) {
+	for _, model := range []string{"qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus", "minimax-m2.7", "opencode-go/qwen3.7-max"} {
+		if !modelUsesAnthropicEndpoint(model) {
+			t.Fatalf("%s should use Anthropic-compatible upstream", model)
+		}
+	}
+	if modelUsesAnthropicEndpoint("kimi-k2.6") {
+		t.Fatal("kimi-k2.6 should use OpenAI-compatible upstream")
+	}
+}
+
+func TestChatToAnthropicForCodexModel(t *testing.T) {
+	or := responsesToChat(ResponsesRequest{Model: "qwen3.7-max", Stream: true, Input: []byte(`[{"type":"message","role":"user","content":"hello"}]`), Tools: []ResponseTool{{Type: "function", Name: "shell", Description: "run", Parameters: []byte(`{"type":"object"}`)}}})
+	ar := chatToAnthropic(or)
+	if ar.Model != "qwen3.7-max" || !ar.Stream || ar.MaxTokens == 0 {
+		t.Fatalf("bad anthropic request metadata: %+v", ar)
+	}
+	if len(ar.Messages) != 1 || ar.Messages[0].Role != "user" || string(ar.Messages[0].Content) != `"hello"` {
+		t.Fatalf("bad anthropic messages: %+v", ar.Messages)
+	}
+	if len(ar.Tools) != 1 || ar.Tools[0].Name != "shell" {
+		t.Fatalf("bad anthropic tools: %+v", ar.Tools)
 	}
 }
 
