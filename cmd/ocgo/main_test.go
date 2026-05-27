@@ -10,17 +10,17 @@ import (
 )
 
 func TestWriteCodexProfile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
 	if err := writeCodexProfile(path, "http://127.0.0.1:3456/v1/"); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(filepath.Join(dir, "ocgo-launch.config.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	content := string(b)
 	for _, want := range []string{
-		"[profiles.ocgo-launch]",
 		`openai_base_url = "http://127.0.0.1:3456/v1/"`,
 		`forced_login_method = "api"`,
 		`model_provider = "ocgo-launch"`,
@@ -36,11 +36,15 @@ func TestWriteCodexProfile(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", want, content)
 		}
 	}
+	if strings.Contains(content, "[profiles.ocgo-launch]") {
+		t.Fatalf("new Codex profile file must not contain legacy [profiles] table:\n%s", content)
+	}
 }
 
-func TestWriteCodexProfileReplacesExistingSections(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
-	existing := "[profiles.ocgo-launch]\nopenai_base_url = \"http://old/v1/\"\n\n[other]\nkey = \"value\"\n\n[model_providers.ocgo-launch]\nbase_url = \"http://old/v1/\"\n"
+func TestWriteCodexProfileMigratesLegacySections(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	existing := "profile = \"ocgo-launch\"\nkeep = \"top\"\n\n[profiles.ocgo-launch]\nopenai_base_url = \"http://old/v1/\"\n\n[other]\nkey = \"value\"\n\n[model_providers.ocgo-launch]\nbase_url = \"http://old/v1/\"\n"
 	if err := os.WriteFile(path, []byte(existing), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -49,14 +53,17 @@ func TestWriteCodexProfileReplacesExistingSections(t *testing.T) {
 	}
 	b, _ := os.ReadFile(path)
 	content := string(b)
-	if strings.Contains(content, "http://old") {
-		t.Fatalf("old profile was not replaced:\n%s", content)
+	for _, gone := range []string{"http://old", "[profiles.ocgo-launch]", "[model_providers.ocgo-launch]", `profile = "ocgo-launch"`} {
+		if strings.Contains(content, gone) {
+			t.Fatalf("legacy Codex profile config %q was not removed:\n%s", gone, content)
+		}
 	}
-	if strings.Count(content, "[profiles.ocgo-launch]") != 1 || strings.Count(content, "[model_providers.ocgo-launch]") != 1 {
-		t.Fatalf("profile sections should be unique:\n%s", content)
-	}
-	if !strings.Contains(content, "[other]") || !strings.Contains(content, `key = "value"`) {
+	if !strings.Contains(content, `keep = "top"`) || !strings.Contains(content, "[other]") || !strings.Contains(content, `key = "value"`) {
 		t.Fatalf("unrelated section was not preserved:\n%s", content)
+	}
+	profile, _ := os.ReadFile(filepath.Join(dir, "ocgo-launch.config.toml"))
+	if !strings.Contains(string(profile), `openai_base_url = "http://new/v1/"`) || !strings.Contains(string(profile), "[model_providers.ocgo-launch]") {
+		t.Fatalf("new profile file was not written correctly:\n%s", string(profile))
 	}
 }
 

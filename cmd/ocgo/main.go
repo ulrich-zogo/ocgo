@@ -278,7 +278,7 @@ func launchCmd() *cobra.Command {
 			return fmt.Errorf("failed to configure codex: %w", err)
 		}
 		if codexConfigOnly {
-			fmt.Printf("Configured Codex profile %q in %s\n", codexProfileName, codexConfigFile())
+			fmt.Printf("Configured Codex profile %q in %s\n", codexProfileName, codexProfileConfigFile())
 			return nil
 		}
 		if err := checkCodexVersion(); err != nil {
@@ -2182,6 +2182,11 @@ func codexConfigFile() string {
 	return filepath.Join(home, ".codex", "config.toml")
 }
 
+func codexProfileConfigFile() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex", codexProfileName+".config.toml")
+}
+
 func codexModelCatalogFile() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".codex", "ocgo-models.json")
@@ -2199,13 +2204,24 @@ func ensureCodexConfig(base string) error {
 }
 
 func writeCodexProfile(path, baseURL string) error {
+	profilePath := filepath.Join(filepath.Dir(path), codexProfileName+".config.toml")
 	catalogPath := codexModelCatalogFile()
-	sections := []struct {
-		header string
-		lines  []string
-	}{
-		{fmt.Sprintf("[profiles.%s]", codexProfileName), []string{fmt.Sprintf("openai_base_url = %q", baseURL), `forced_login_method = "api"`, fmt.Sprintf("model_provider = %q", codexProfileName), fmt.Sprintf("model_catalog_json = %q", catalogPath), `model_reasoning_effort = "minimal"`, `model_reasoning_summary = "none"`}},
-		{fmt.Sprintf("[model_providers.%s]", codexProfileName), []string{`name = "OpenCode Go"`, fmt.Sprintf("base_url = %q", baseURL), `wire_api = "responses"`}},
+	profileText := strings.Join([]string{
+		fmt.Sprintf("openai_base_url = %q", baseURL),
+		`forced_login_method = "api"`,
+		fmt.Sprintf("model_provider = %q", codexProfileName),
+		fmt.Sprintf("model_catalog_json = %q", catalogPath),
+		`model_reasoning_effort = "minimal"`,
+		`model_reasoning_summary = "none"`,
+		"",
+		fmt.Sprintf("[model_providers.%s]", codexProfileName),
+		`name = "OpenCode Go"`,
+		fmt.Sprintf("base_url = %q", baseURL),
+		`wire_api = "responses"`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(profilePath, []byte(profileText), 0644); err != nil {
+		return err
 	}
 	b, err := os.ReadFile(path)
 	text := ""
@@ -2214,26 +2230,38 @@ func writeCodexProfile(path, baseURL string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, s := range sections {
-		block := strings.Join(append([]string{s.header}, s.lines...), "\n") + "\n"
-		if idx := strings.Index(text, s.header); idx >= 0 {
-			rest := text[idx+len(s.header):]
-			if endIdx := strings.Index(rest, "\n["); endIdx >= 0 {
-				text = text[:idx] + block + rest[endIdx+1:]
-			} else {
-				text = text[:idx] + block
-			}
-		} else {
-			if text != "" && !strings.HasSuffix(text, "\n") {
-				text += "\n"
-			}
-			if text != "" {
-				text += "\n"
-			}
-			text += block
-		}
+	cleaned := stripLegacyCodexProfile(text)
+	if cleaned == "" && errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
-	return os.WriteFile(path, []byte(text), 0644)
+	return os.WriteFile(path, []byte(cleaned), 0644)
+}
+
+func stripLegacyCodexProfile(text string) string {
+	var out []string
+	inRemovedSection := false
+	currentSection := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			currentSection = trimmed
+			inRemovedSection = currentSection == fmt.Sprintf("[profiles.%s]", codexProfileName) || currentSection == fmt.Sprintf("[model_providers.%s]", codexProfileName)
+			if inRemovedSection {
+				continue
+			}
+		}
+		if inRemovedSection {
+			continue
+		}
+		if currentSection == "" && strings.HasPrefix(trimmed, "profile") {
+			parts := strings.SplitN(trimmed, "=", 2)
+			if len(parts) == 2 && strings.TrimSpace(parts[0]) == "profile" && strings.Trim(strings.TrimSpace(parts[1]), `"'`) == codexProfileName {
+				continue
+			}
+		}
+		out = append(out, line)
+	}
+	return strings.TrimLeft(strings.Join(out, "\n"), "\n")
 }
 
 func writeCodexModelCatalog(path string) error {
