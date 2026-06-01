@@ -127,10 +127,13 @@ func TestWriteCodexModelCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	var minimax map[string]any
+	var qwen map[string]any
 	for _, model := range catalog.Models {
-		if model["slug"] == "minimax-m3" {
+		switch model["slug"] {
+		case "minimax-m3":
 			minimax = model
-			break
+		case "qwen3.7-max":
+			qwen = model
 		}
 	}
 	if minimax == nil {
@@ -150,6 +153,12 @@ func TestWriteCodexModelCatalog(t *testing.T) {
 	}
 	if strings.Contains(modalities, "video") {
 		t.Fatalf("Codex catalog modalities must not include unsupported video modality: %v", minimax["input_modalities"])
+	}
+	if qwen == nil {
+		t.Fatal("qwen3.7-max not found in catalog")
+	}
+	if got := qwen["supports_search_tool"]; got != true {
+		t.Fatalf("qwen3.7-max supports_search_tool = %v, want true", got)
 	}
 }
 
@@ -280,6 +289,31 @@ func TestChatToAnthropicForCodexModel(t *testing.T) {
 	}
 }
 
+func TestResponsesToChatMapsBuiltInWebToolsForAnthropicModels(t *testing.T) {
+	or := responsesToChat(ResponsesRequest{
+		Model:  "qwen3.7-max",
+		Input:  []byte(`[{"type":"message","role":"user","content":"search the web"}]`),
+		Tools:  []ResponseTool{{Type: "web_search_preview"}, {Type: "web_search"}, {Type: "web_extractor"}, {Type: "function", Name: "shell", Parameters: []byte(`{"type":"object"}`)}},
+		Stream: true,
+	})
+	if len(or.AnthropicTools) != 2 {
+		t.Fatalf("expected web search and fetch anthropic tools, got %+v", or.AnthropicTools)
+	}
+	ar := chatToAnthropic(or)
+	if len(ar.Tools) != 3 {
+		t.Fatalf("expected 2 built-in tools plus shell, got %+v", ar.Tools)
+	}
+	if ar.Tools[0].Type != "web_search_20250305" || ar.Tools[0].Name != "web_search" {
+		t.Fatalf("bad web search tool mapping: %+v", ar.Tools[0])
+	}
+	if ar.Tools[1].Type != "web_fetch_20250910" || ar.Tools[1].Name != "web_fetch" {
+		t.Fatalf("bad web fetch tool mapping: %+v", ar.Tools[1])
+	}
+	if ar.Tools[2].Type != "" || ar.Tools[2].Name != "shell" {
+		t.Fatalf("bad function tool mapping: %+v", ar.Tools[2])
+	}
+}
+
 func TestResponsesToChatSkipsEmptyToolNamesAndDefaultsParameters(t *testing.T) {
 	or := responsesToChat(ResponsesRequest{
 		Model: "minimax-m2.7",
@@ -311,6 +345,7 @@ func TestNormalizeAnthropicRequestForStrictUpstream(t *testing.T) {
 		Reasoning:    []byte(`{"effort":"high"}`),
 		OutputConfig: []byte(`{"reasoning":{"depth":2}}`),
 		System:       []byte(`[{"type":"text","text":"rules","cache_control":{"type":"ephemeral"}}]`),
+		Tools:        []ATool{{Type: "web_search_20250305", Name: "web_search", MaxUses: 8, AllowedDomains: []string{"example.com"}}},
 		Messages: []AMessage{{Role: "user", Content: []byte(`[
 			{"type":"text","text":"hello","cache_control":{"type":"ephemeral"}},
 			{"type":"thinking","thinking":"private","signature":"abc"},
@@ -328,7 +363,7 @@ func TestNormalizeAnthropicRequestForStrictUpstream(t *testing.T) {
 			t.Fatalf("strict upstream request still contains %q: %s", gone, out)
 		}
 	}
-	for _, want := range []string{`"model":"qwen3.7-max"`, `"system":"rules"`, `"type":"text"`, `"text":"hello"`, `"tool_use_id":"toolu_1"`} {
+	for _, want := range []string{`"model":"qwen3.7-max"`, `"system":"rules"`, `"type":"text"`, `"text":"hello"`, `"tool_use_id":"toolu_1"`, `"type":"web_search_20250305"`, `"name":"web_search"`, `"max_uses":8`, `"allowed_domains":["example.com"]`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in normalized request: %s", want, out)
 		}

@@ -64,9 +64,14 @@ type AMessage struct {
 }
 
 type ATool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+	Type           string          `json:"type,omitempty"`
+	Name           string          `json:"name"`
+	Description    string          `json:"description,omitempty"`
+	InputSchema    json.RawMessage `json:"input_schema,omitempty"`
+	MaxUses        int             `json:"max_uses,omitempty"`
+	AllowedDomains []string        `json:"allowed_domains,omitempty"`
+	BlockedDomains []string        `json:"blocked_domains,omitempty"`
+	UserLocation   json.RawMessage `json:"user_location,omitempty"`
 }
 
 type OAIRequest struct {
@@ -79,6 +84,7 @@ type OAIRequest struct {
 	TopP            *float64          `json:"top_p,omitempty"`
 	Tools           []OAITool         `json:"tools,omitempty"`
 	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	AnthropicTools  []ATool           `json:"-"`
 }
 
 type OAIStreamOptions struct {
@@ -104,10 +110,12 @@ type ResponsesRequest struct {
 }
 
 type ResponseTool struct {
-	Type        string          `json:"type"`
-	Name        string          `json:"name,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Type              string          `json:"type"`
+	Name              string          `json:"name,omitempty"`
+	Description       string          `json:"description,omitempty"`
+	Parameters        json.RawMessage `json:"parameters,omitempty"`
+	SearchContextSize string          `json:"search_context_size,omitempty"`
+	UserLocation      json.RawMessage `json:"user_location,omitempty"`
 }
 
 type OAIMessage struct {
@@ -215,6 +223,7 @@ type openCodeModelMetadata struct {
 	UsesAnthropicEndpoint   bool
 	ParallelToolCalls       bool
 	SupportsImageOriginal   bool
+	SupportsSearchTool      bool
 	SupportedReasoning      []any
 	DefaultReasoningLevel   any
 	ReasoningSummaries      bool
@@ -244,8 +253,11 @@ func modelMetadata(model string) openCodeModelMetadata {
 		meta.MaxContextWindow = 512000
 		meta.UsesAnthropicEndpoint = true
 		meta.ParallelToolCalls = true
-	case "minimax-m2.7", "minimax-m2.5", "qwen3.7-max":
+	case "minimax-m2.7", "minimax-m2.5":
 		meta.UsesAnthropicEndpoint = true
+	case "qwen3.7-max":
+		meta.UsesAnthropicEndpoint = true
+		meta.SupportsSearchTool = true
 	case "kimi-k2.6", "kimi-k2.5", "mimo-v2-omni":
 		meta.InputModalities = []string{"text", "image"}
 		meta.CodexInputModalities = []string{"text", "image"}
@@ -1237,11 +1249,36 @@ func responsesToChat(rr ResponsesRequest) OAIRequest {
 	}
 	out.Messages = append(out.Messages, responsesInputToMessages(rr.Input)...)
 	for _, t := range rr.Tools {
+		if tool, ok := responseBuiltinToolToAnthropic(t); ok {
+			out.AnthropicTools = appendUniqueAnthropicTool(out.AnthropicTools, tool)
+			continue
+		}
 		if strings.TrimSpace(t.Name) != "" && (t.Type == "" || t.Type == "function") {
 			out.Tools = append(out.Tools, OAITool{Type: "function", Function: OAIFunction{Name: t.Name, Description: t.Description, Parameters: toolParametersOrDefault(t.Parameters)}})
 		}
 	}
 	return out
+}
+
+func responseBuiltinToolToAnthropic(t ResponseTool) (ATool, bool) {
+	switch strings.ToLower(strings.TrimSpace(t.Type)) {
+	case "web_search", "web_search_2025_08_26", "web_search_preview", "web_search_preview_2025_03_11":
+		tool := ATool{Type: "web_search_20250305", Name: "web_search", UserLocation: t.UserLocation}
+		return tool, true
+	case "web_fetch", "web_extractor":
+		return ATool{Type: "web_fetch_20250910", Name: "web_fetch"}, true
+	default:
+		return ATool{}, false
+	}
+}
+
+func appendUniqueAnthropicTool(tools []ATool, tool ATool) []ATool {
+	for _, existing := range tools {
+		if existing.Type == tool.Type && existing.Name == tool.Name {
+			return tools
+		}
+	}
+	return append(tools, tool)
 }
 
 func toolParametersOrDefault(raw json.RawMessage) json.RawMessage {
@@ -1281,6 +1318,9 @@ func chatToAnthropic(or OAIRequest) AnthropicRequest {
 	}
 	if len(system) > 0 {
 		out.System = marshalJSON(strings.Join(system, "\n\n"))
+	}
+	for _, t := range or.AnthropicTools {
+		out.Tools = appendUniqueAnthropicTool(out.Tools, t)
 	}
 	for _, t := range or.Tools {
 		if strings.TrimSpace(t.Function.Name) != "" && (t.Type == "" || t.Type == "function") {
@@ -2751,7 +2791,7 @@ func writeCodexModelCatalog(path string) error {
 			"effective_context_window_percent": 95,
 			"experimental_supported_tools":     []any{},
 			"input_modalities":                 meta.CodexInputModalities,
-			"supports_search_tool":             false,
+			"supports_search_tool":             meta.SupportsSearchTool,
 		})
 	}
 	for i, id := range knownModelIDs() {
