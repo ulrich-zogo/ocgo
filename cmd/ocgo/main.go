@@ -201,7 +201,55 @@ func listCmd() *cobra.Command {
 }
 
 func knownModelIDs() []string {
-	return []string{"glm-5.1", "glm-5", "kimi-k2.6", "kimi-k2.5", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni", "minimax-m2.7", "minimax-m2.5", "deepseek-v4-pro", "deepseek-v4-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus"}
+	return []string{"glm-5.1", "glm-5", "kimi-k2.6", "kimi-k2.5", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni", "minimax-m3", "minimax-m2.7", "minimax-m2.5", "deepseek-v4-pro", "deepseek-v4-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus"}
+}
+
+type openCodeModelMetadata struct {
+	DisplayName             string
+	Description             string
+	InputModalities         []string
+	CodexInputModalities    []string
+	ContextWindow           int
+	MaxContextWindow        int
+	UsesAnthropicEndpoint   bool
+	ParallelToolCalls       bool
+	SupportsImageOriginal   bool
+	SupportedReasoning      []any
+	DefaultReasoningLevel   any
+	ReasoningSummaries      bool
+	DefaultReasoningSummary string
+}
+
+func modelMetadata(model string) openCodeModelMetadata {
+	id := modelID(model)
+	meta := openCodeModelMetadata{
+		DisplayName:             id,
+		Description:             "OpenCode Go model",
+		InputModalities:         []string{"text"},
+		CodexInputModalities:    []string{"text"},
+		ContextWindow:           128000,
+		MaxContextWindow:        128000,
+		DefaultReasoningLevel:   nil,
+		SupportedReasoning:      []any{},
+		DefaultReasoningSummary: "none",
+	}
+	switch id {
+	case "minimax-m3":
+		meta.DisplayName = "MiniMax M3"
+		meta.Description = "MiniMax M3 via OpenCode Go"
+		meta.InputModalities = []string{"text", "image", "video"}
+		meta.CodexInputModalities = []string{"text", "image"}
+		meta.ContextWindow = 512000
+		meta.MaxContextWindow = 512000
+		meta.UsesAnthropicEndpoint = true
+		meta.ParallelToolCalls = true
+	case "minimax-m2.7", "minimax-m2.5", "qwen3.7-max":
+		meta.UsesAnthropicEndpoint = true
+	case "kimi-k2.6", "kimi-k2.5", "mimo-v2-omni":
+		meta.InputModalities = []string{"text", "image"}
+		meta.CodexInputModalities = []string{"text", "image"}
+	}
+	return meta
 }
 
 func modelID(model string) string {
@@ -209,28 +257,21 @@ func modelID(model string) string {
 }
 
 func modelUsesAnthropicEndpoint(model string) bool {
-	switch modelID(model) {
-	case "minimax-m2.7", "minimax-m2.5", "qwen3.7-max":
-		return true
-	default:
-		return false
-	}
+	return modelMetadata(model).UsesAnthropicEndpoint
 }
 
 func modelSupportsImages(model string) bool {
-	switch modelID(model) {
-	case "kimi-k2.6", "kimi-k2.5", "mimo-v2-omni":
-		return true
-	default:
-		return false
+	for _, modality := range modelMetadata(model).InputModalities {
+		if modality == "image" {
+			return true
+		}
 	}
+	return false
 }
 
 func modelInputModalities(model string) []string {
-	if modelSupportsImages(model) {
-		return []string{"text", "image"}
-	}
-	return []string{"text"}
+	modalities := modelMetadata(model).InputModalities
+	return append([]string(nil), modalities...)
 }
 
 func launchCmd() *cobra.Command {
@@ -2389,12 +2430,13 @@ func stripLegacyCodexProfile(text string) string {
 func writeCodexModelCatalog(path string) error {
 	models := make([]map[string]any, 0, len(knownModelIDs()))
 	for i, id := range knownModelIDs() {
+		meta := modelMetadata(id)
 		models = append(models, map[string]any{
 			"slug":                             id,
-			"display_name":                     id,
-			"description":                      "OpenCode Go model",
-			"default_reasoning_level":          nil,
-			"supported_reasoning_levels":       []any{},
+			"display_name":                     meta.DisplayName,
+			"description":                      meta.Description,
+			"default_reasoning_level":          meta.DefaultReasoningLevel,
+			"supported_reasoning_levels":       meta.SupportedReasoning,
 			"shell_type":                       "shell_command",
 			"visibility":                       "list",
 			"supported_in_api":                 true,
@@ -2402,21 +2444,21 @@ func writeCodexModelCatalog(path string) error {
 			"availability_nux":                 nil,
 			"upgrade":                          nil,
 			"base_instructions":                "You are Codex, a coding agent running in a terminal-based coding assistant.",
-			"supports_reasoning_summaries":     false,
-			"default_reasoning_summary":        "none",
+			"supports_reasoning_summaries":     meta.ReasoningSummaries,
+			"default_reasoning_summary":        meta.DefaultReasoningSummary,
 			"support_verbosity":                false,
 			"default_verbosity":                nil,
 			"apply_patch_tool_type":            nil,
 			"web_search_tool_type":             "text",
 			"truncation_policy":                map[string]any{"mode": "tokens", "limit": 10000},
-			"supports_parallel_tool_calls":     false,
-			"supports_image_detail_original":   false,
-			"context_window":                   128000,
-			"max_context_window":               128000,
+			"supports_parallel_tool_calls":     meta.ParallelToolCalls,
+			"supports_image_detail_original":   meta.SupportsImageOriginal,
+			"context_window":                   meta.ContextWindow,
+			"max_context_window":               meta.MaxContextWindow,
 			"auto_compact_token_limit":         nil,
 			"effective_context_window_percent": 95,
 			"experimental_supported_tools":     []any{},
-			"input_modalities":                 modelInputModalities(id),
+			"input_modalities":                 meta.CodexInputModalities,
 			"supports_search_tool":             false,
 		})
 	}

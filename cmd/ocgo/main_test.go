@@ -80,16 +80,62 @@ func TestWriteCodexModelCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(b)
-	for _, want := range []string{`"models"`, `"slug": "deepseek-v4-pro"`, `"slug": "qwen3.7-max"`, `"context_window": 128000`, `"truncation_policy"`, `"supports_image_detail_original": false`, `"image"`} {
+	for _, want := range []string{`"models"`, `"slug": "deepseek-v4-pro"`, `"slug": "qwen3.7-max"`, `"slug": "minimax-m3"`, `"context_window": 128000`, `"truncation_policy"`, `"supports_image_detail_original": false`, `"image"`} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("missing %q in:\n%s", want, content)
 		}
 	}
+	var catalog struct {
+		Models []map[string]any `json:"models"`
+	}
+	if err := json.Unmarshal(b, &catalog); err != nil {
+		t.Fatal(err)
+	}
+	var minimax map[string]any
+	for _, model := range catalog.Models {
+		if model["slug"] == "minimax-m3" {
+			minimax = model
+			break
+		}
+	}
+	if minimax == nil {
+		t.Fatal("minimax-m3 not found in catalog")
+	}
+	if got := int(minimax["context_window"].(float64)); got != 512000 {
+		t.Fatalf("minimax-m3 context_window = %d, want 512000", got)
+	}
+	if got := int(minimax["max_context_window"].(float64)); got != 512000 {
+		t.Fatalf("minimax-m3 max_context_window = %d, want 512000", got)
+	}
+	if got := minimax["display_name"]; got != "MiniMax M3" {
+		t.Fatalf("minimax-m3 display_name = %v, want MiniMax M3", got)
+	}
+	modalities, ok := minimax["input_modalities"].([]any)
+	if !ok {
+		t.Fatalf("minimax-m3 modalities have unexpected type: %T", minimax["input_modalities"])
+	}
+	if strings.Join(anyStrings(modalities), ",") != "text,image" {
+		t.Fatalf("minimax-m3 Codex modalities = %v, want [text image]", minimax["input_modalities"])
+	}
+	if got := minimax["supports_parallel_tool_calls"]; got != true {
+		t.Fatalf("minimax-m3 supports_parallel_tool_calls = %v, want true", got)
+	}
+}
+
+func anyStrings(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, value.(string))
+	}
+	return out
 }
 
 func TestCodexModelCatalogAllowsImagesForKnownVisionModels(t *testing.T) {
 	if !modelSupportsImages("kimi-k2.6") {
 		t.Fatal("kimi-k2.6 should support image inputs")
+	}
+	if !modelSupportsImages("minimax-m3") {
+		t.Fatal("minimax-m3 should support image inputs")
 	}
 	if modelSupportsImages("deepseek-v4-pro") {
 		t.Fatal("deepseek-v4-pro should not support image inputs")
@@ -99,6 +145,7 @@ func TestCodexModelCatalogAllowsImagesForKnownVisionModels(t *testing.T) {
 		want  []string
 	}{
 		{model: "kimi-k2.6", want: []string{"text", "image"}},
+		{model: "minimax-m3", want: []string{"text", "image", "video"}},
 		{model: "deepseek-v4-pro", want: []string{"text"}},
 	} {
 		got := modelInputModalities(tc.model)
@@ -109,7 +156,7 @@ func TestCodexModelCatalogAllowsImagesForKnownVisionModels(t *testing.T) {
 }
 
 func TestAnthropicEndpointModels(t *testing.T) {
-	for _, model := range []string{"qwen3.7-max", "minimax-m2.7", "opencode-go/qwen3.7-max"} {
+	for _, model := range []string{"qwen3.7-max", "minimax-m3", "minimax-m2.7", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3"} {
 		if !modelUsesAnthropicEndpoint(model) {
 			t.Fatalf("%s should use Anthropic-compatible upstream", model)
 		}
