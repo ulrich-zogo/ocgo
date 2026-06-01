@@ -2740,30 +2740,7 @@ func writeCodexProfile(path, baseURL string) error {
 		return err
 	}
 	cleaned := stripLegacyCodexProfile(text)
-	return os.WriteFile(path, []byte(appendLegacyCodexProfile(cleaned, baseURL, catalogPath)), 0644)
-}
-
-func appendLegacyCodexProfile(text, baseURL, catalogPath string) string {
-	text = strings.TrimSpace(text)
-	legacy := strings.Join([]string{
-		fmt.Sprintf("[profiles.%s]", codexProfileName),
-		fmt.Sprintf("openai_base_url = %q", baseURL),
-		`forced_login_method = "api"`,
-		fmt.Sprintf("model_provider = %q", codexProfileName),
-		fmt.Sprintf("model_catalog_json = %q", catalogPath),
-		`model_reasoning_effort = "minimal"`,
-		`model_reasoning_summary = "none"`,
-		"",
-		fmt.Sprintf("[model_providers.%s]", codexProfileName),
-		`name = "OpenCode Go"`,
-		fmt.Sprintf("base_url = %q", baseURL),
-		`wire_api = "responses"`,
-		"",
-	}, "\n")
-	if text == "" {
-		return legacy
-	}
-	return text + "\n\n" + legacy
+	return os.WriteFile(path, []byte(cleaned), 0644)
 }
 
 func stripLegacyCodexProfile(text string) string {
@@ -2774,7 +2751,7 @@ func stripLegacyCodexProfile(text string) string {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 			currentSection = trimmed
-			inRemovedSection = currentSection == fmt.Sprintf("[profiles.%s]", codexProfileName) || currentSection == fmt.Sprintf("[model_providers.%s]", codexProfileName)
+			inRemovedSection = isLegacyCodexProfileSection(currentSection)
 			if inRemovedSection {
 				continue
 			}
@@ -2791,6 +2768,15 @@ func stripLegacyCodexProfile(text string) string {
 		out = append(out, line)
 	}
 	return strings.TrimLeft(strings.Join(out, "\n"), "\n")
+}
+
+func isLegacyCodexProfileSection(section string) bool {
+	profiles := fmt.Sprintf("[profiles.%s", codexProfileName)
+	providers := fmt.Sprintf("[model_providers.%s", codexProfileName)
+	return section == fmt.Sprintf("[profiles.%s]", codexProfileName) ||
+		strings.HasPrefix(section, profiles+".") ||
+		section == fmt.Sprintf("[model_providers.%s]", codexProfileName) ||
+		strings.HasPrefix(section, providers+".")
 }
 
 func writeCodexModelCatalog(path string) error {

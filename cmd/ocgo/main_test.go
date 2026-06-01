@@ -60,23 +60,15 @@ func TestWriteCodexProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy := string(b)
-	for _, want := range []string{
-		"[profiles.ocgo-launch]",
-		`openai_base_url = "http://127.0.0.1:3456/v1/"`,
-		`model_provider = "ocgo-launch"`,
-		"[model_providers.ocgo-launch]",
-	} {
-		if !strings.Contains(legacy, want) {
-			t.Fatalf("missing legacy config %q in:\n%s", want, legacy)
-		}
+	if strings.TrimSpace(string(b)) != "" {
+		t.Fatalf("root Codex config should not contain ocgo legacy profile entries:\n%s", string(b))
 	}
 }
 
 func TestWriteCodexProfileMigratesLegacySections(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	existing := "profile = \"ocgo-launch\"\nkeep = \"top\"\n\n[profiles.ocgo-launch]\nopenai_base_url = \"http://old/v1/\"\n\n[other]\nkey = \"value\"\n\n[model_providers.ocgo-launch]\nbase_url = \"http://old/v1/\"\n"
+	existing := "profile = \"ocgo-launch\"\nkeep = \"top\"\n\n[profiles.ocgo-launch]\nopenai_base_url = \"http://old/v1/\"\n\n[profiles.ocgo-launch.features]\nmemories = false\n\n[other]\nkey = \"value\"\n\n[model_providers.ocgo-launch]\nbase_url = \"http://old/v1/\"\n\n[model_providers.ocgo-launch.headers]\nfoo = \"bar\"\n"
 	if err := os.WriteFile(path, []byte(existing), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -90,9 +82,9 @@ func TestWriteCodexProfileMigratesLegacySections(t *testing.T) {
 			t.Fatalf("legacy Codex profile config %q was not removed:\n%s", gone, content)
 		}
 	}
-	for _, want := range []string{"[profiles.ocgo-launch]", "[model_providers.ocgo-launch]", `openai_base_url = "http://new/v1/"`} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("new legacy-compatible config %q missing:\n%s", want, content)
+	for _, gone := range []string{"[profiles.ocgo-launch]", "[profiles.ocgo-launch.features]", "[model_providers.ocgo-launch]", "[model_providers.ocgo-launch.headers]", `openai_base_url = "http://new/v1/"`} {
+		if strings.Contains(content, gone) {
+			t.Fatalf("legacy Codex profile config %q was re-added:\n%s", gone, content)
 		}
 	}
 	if !strings.Contains(content, `keep = "top"`) || !strings.Contains(content, "[other]") || !strings.Contains(content, `key = "value"`) {
