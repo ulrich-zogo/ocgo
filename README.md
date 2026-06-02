@@ -1,4 +1,36 @@
-# ocgo
+<h1 align="center">ocgo</h1>
+<div align="center">
+  <a href="https://github.com/emanuelcasco/ocgo/releases">
+    <img alt="GitHub release" src="https://img.shields.io/github/v/release/emanuelcasco/ocgo?color=blue">
+  </a>
+  <a href="https://github.com/emanuelcasco/ocgo/releases">
+    <img alt="GitHub downloads" src="https://img.shields.io/github/downloads/emanuelcasco/ocgo/total">
+  </a>
+  <a href="https://github.com/emanuelcasco/ocgo/blob/main/LICENSE">
+    <img alt="GitHub license" src="https://img.shields.io/github/license/emanuelcasco/ocgo">
+  </a>
+  <a href="https://go.dev/doc/go1.22">
+    <img alt="Go version" src="https://img.shields.io/github/go-mod/go-version/emanuelcasco/ocgo">
+  </a>
+</div>
+
+<br/>
+
+<div align="center">
+ <img alt="Logo" src="assets/ocgo-logo.svg">
+</div>
+
+<br/>
+
+
+<div align="center">
+  <a href="https://github.com/emanuelcasco/ocgo">ocgo</a> is a small Go CLI for using your OpenCode Go subscription from Claude Code or Codex CLI in one command — no manual proxy setup required.
+  <br/>
+  <br/>
+  🤖 <em>Claude Code support.</em>  🧠 <em>Codex CLI support.</em> ⚡ <em>Local compatibility proxy.</em>
+</div>
+
+## Why `ocgo`?
 
 `ocgo` is a small Go CLI that lets [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex CLI](https://developers.openai.com/codex/cli/) run against an OpenCode Go subscription. It starts a local compatibility proxy, translates Claude Code's Anthropic Messages API requests when needed, exposes OpenAI-compatible endpoints for Codex, and launches tools with the right configuration.
 
