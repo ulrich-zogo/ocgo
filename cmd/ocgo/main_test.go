@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,9 +20,17 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	old := modelMappingFile
+	oldRemoteModels := remoteModels
+	oldOfficialModels := officialModels
 	modelMappingFile = func() string { return filepath.Join(dir, "model-mapping.json") }
+	remoteModels = newLazyFetcher(func() (map[string]remoteModelInfo, error) {
+		return nil, errors.New("remote model fetch disabled in tests")
+	})
+	officialModels = newLazyFetcher(func() ([]string, error) { return nil, errors.New("official model fetch disabled in tests") })
 	code := m.Run()
 	modelMappingFile = old
+	remoteModels = oldRemoteModels
+	officialModels = oldOfficialModels
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }
@@ -227,6 +236,69 @@ func withTempModelMappingFile(t *testing.T, path string) {
 	old := modelMappingFile
 	modelMappingFile = func() string { return path }
 	t.Cleanup(func() { modelMappingFile = old })
+}
+
+func withModelFetchers(t *testing.T, remote map[string]remoteModelInfo, official []string) {
+	t.Helper()
+	oldRemoteModels := remoteModels
+	oldOfficialModels := officialModels
+	remoteModels = newLazyFetcher(func() (map[string]remoteModelInfo, error) {
+		if remote == nil {
+			return nil, errors.New("remote unavailable")
+		}
+		return remote, nil
+	})
+	officialModels = newLazyFetcher(func() ([]string, error) {
+		if official == nil {
+			return nil, errors.New("official unavailable")
+		}
+		return official, nil
+	})
+	t.Cleanup(func() {
+		remoteModels = oldRemoteModels
+		officialModels = oldOfficialModels
+	})
+}
+
+func testRemoteModel(name string, contextWindow int, modalities ...string) remoteModelInfo {
+	var m remoteModelInfo
+	m.Name = name
+	m.Limit.Context = contextWindow
+	m.Modalities.Input = append([]string(nil), modalities...)
+	return m
+}
+
+func TestKnownModelIDsPreferOfficialThenRemoteThenFallback(t *testing.T) {
+	withModelFetchers(t, map[string]remoteModelInfo{"remote-b": {}, "remote-a": {}}, []string{"official-b", "official-a"})
+	if got := strings.Join(knownModelIDs(), ","); got != "official-a,official-b" {
+		t.Fatalf("official IDs = %s", got)
+	}
+
+	withModelFetchers(t, map[string]remoteModelInfo{"remote-b": {}, "remote-a": {}}, nil)
+	if got := strings.Join(knownModelIDs(), ","); got != "remote-a,remote-b" {
+		t.Fatalf("remote fallback IDs = %s", got)
+	}
+
+	withModelFetchers(t, nil, nil)
+	if got := knownModelIDs(); len(got) == 0 || got[0] != fallbackModelIDs[0] {
+		t.Fatalf("hardcoded fallback IDs = %+v", got)
+	}
+}
+
+func TestModelMetadataUsesRemoteFixtureWithoutLiveNetwork(t *testing.T) {
+	withModelFetchers(t, map[string]remoteModelInfo{
+		"kimi-k2.6": testRemoteModel("Kimi K2.6", 262144, "text", "image", "video"),
+	}, nil)
+	meta := modelMetadata("kimi-k2.6")
+	if meta.DisplayName != "Kimi K2.6" || meta.ContextWindow != 262144 {
+		t.Fatalf("remote metadata was not applied: %+v", meta)
+	}
+	if strings.Join(meta.InputModalities, ",") != "text,image,video" {
+		t.Fatalf("input modalities = %+v", meta.InputModalities)
+	}
+	if strings.Join(meta.CodexInputModalities, ",") != "text,image" {
+		t.Fatalf("codex modalities should exclude unsupported video: %+v", meta.CodexInputModalities)
+	}
 }
 
 func TestCodexModelCatalogAllowsImagesForKnownVisionModels(t *testing.T) {
@@ -952,5 +1024,119 @@ func TestStreamResponsesForwardsToolCalls(t *testing.T) {
 	messages := responsesInputToMessages([]byte(`[{"type":"function_call","call_id":"call_abc","name":"shell","arguments":"{\"cmd\":\"pwd\"}"},{"type":"function_call_output","call_id":"call_abc","output":"/tmp"}]`))
 	if messages[0].ReasoningContent != "I should call the tool." {
 		t.Fatalf("missing cached reasoning content: %+v", messages[0])
+	}
+}
+
+func TestSanitizeOAIToolMessagesInsertsMissingBeforeNextMessage(t *testing.T) {
+	in := []OAIMessage{
+		{Role: "user", Content: "run pwd"},
+		{Role: "assistant", ToolCalls: []OAIToolCall{{ID: "call_missing", Type: "function", Function: OAICallFunction{Name: "Bash"}}}},
+		{Role: "assistant", Content: "done"},
+	}
+	out := sanitizeOAIToolMessages(in)
+	if len(out) != 4 {
+		t.Fatalf("expected placeholder insertion, got %+v", out)
+	}
+	if out[2].Role != "tool" || out[2].ToolCallID != "call_missing" || out[2].Content != unavailableToolResultContent {
+		t.Fatalf("bad placeholder at index 2: %+v", out[2])
+	}
+}
+
+func TestSanitizeOAIToolMessagesDropsLateToolMessage(t *testing.T) {
+	in := []OAIMessage{
+		{Role: "assistant", ToolCalls: []OAIToolCall{{ID: "call_1", Type: "function", Function: OAICallFunction{Name: "Bash"}}}},
+		{Role: "assistant", Content: "done"},
+		{Role: "tool", ToolCallID: "call_1", Content: "late result"},
+	}
+	out := sanitizeOAIToolMessages(in)
+	if len(out) != 3 {
+		t.Fatalf("expected placeholder plus assistant only, got %+v", out)
+	}
+	if out[1].Role != "tool" || out[1].ToolCallID != "call_1" || out[1].Content != unavailableToolResultContent {
+		t.Fatalf("expected placeholder before next assistant, got %+v", out[1])
+	}
+	if out[2].Role != "assistant" || out[2].Content != "done" {
+		t.Fatalf("assistant message not preserved after placeholder: %+v", out[2])
+	}
+}
+
+func TestSanitizeOAIToolMessagesPreservesValidConsecutiveResults(t *testing.T) {
+	in := []OAIMessage{
+		{Role: "assistant", ToolCalls: []OAIToolCall{
+			{ID: "call_a", Type: "function", Function: OAICallFunction{Name: "Bash"}},
+			{ID: "call_b", Type: "function", Function: OAICallFunction{Name: "Read"}},
+		}},
+		{Role: "tool", ToolCallID: "call_b", Content: "b"},
+		{Role: "tool", ToolCallID: "call_a", Content: "a"},
+		{Role: "user", Content: "thanks"},
+	}
+	out := sanitizeOAIToolMessages(in)
+	if len(out) != len(in) {
+		t.Fatalf("valid sequence should remain same length, got %+v", out)
+	}
+	if out[1].Content != "b" || out[2].Content != "a" {
+		t.Fatalf("existing tool result order should be preserved: %+v", out)
+	}
+}
+
+func TestSanitizeRawChatToolMessagesPreservesUnknownFields(t *testing.T) {
+	body := []byte(`{"model":"deepseek-v4-pro","messages":[{"role":"assistant","content":"","name":"assistant-name","tool_calls":[{"id":"call_1","type":"function","function":{"name":"Bash","arguments":"{}"}}],"audio":{"id":"aud"}},{"role":"assistant","content":"done","refusal":"no"}]}`)
+	out := sanitizeRawChatToolMessages(body)
+	var req map[string]json.RawMessage
+	if err := json.Unmarshal(out, &req); err != nil {
+		t.Fatal(err)
+	}
+	var messages []map[string]json.RawMessage
+	if err := json.Unmarshal(req["messages"], &messages); err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("expected inserted placeholder, got %d messages: %s", len(messages), out)
+	}
+	if _, ok := messages[0]["name"]; !ok {
+		t.Fatalf("unknown assistant field name was dropped: %s", messages[0])
+	}
+	if _, ok := messages[0]["audio"]; !ok {
+		t.Fatalf("unknown assistant field audio was dropped: %s", messages[0])
+	}
+	if _, ok := messages[2]["refusal"]; !ok {
+		t.Fatalf("unknown later assistant field refusal was dropped: %s", messages[2])
+	}
+	var placeholder struct {
+		Role       string `json:"role"`
+		ToolCallID string `json:"tool_call_id"`
+		Content    string `json:"content"`
+	}
+	if err := json.Unmarshal(marshalJSON(messages[1]), &placeholder); err != nil {
+		t.Fatal(err)
+	}
+	if placeholder.Role != "tool" || placeholder.ToolCallID != "call_1" || placeholder.Content != unavailableToolResultContent {
+		t.Fatalf("bad placeholder: %+v", placeholder)
+	}
+}
+
+func TestSanitizeRawChatToolMessagesDropsLateToolMessage(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"Bash","arguments":"{}"}}]},{"role":"assistant","content":"done"},{"role":"tool","tool_call_id":"call_1","content":"late"}]}`)
+	out := sanitizeRawChatToolMessages(body)
+	var req map[string]json.RawMessage
+	if err := json.Unmarshal(out, &req); err != nil {
+		t.Fatal(err)
+	}
+	var roles []struct {
+		Role       string `json:"role"`
+		ToolCallID string `json:"tool_call_id"`
+		Content    string `json:"content"`
+	}
+	if err := json.Unmarshal(req["messages"], &roles); err != nil {
+		t.Fatal(err)
+	}
+	if len(roles) != 3 {
+		t.Fatalf("late tool should be dropped and placeholder inserted, got %+v", roles)
+	}
+	if roles[1].Role != "tool" || roles[1].ToolCallID != "call_1" || roles[1].Content != unavailableToolResultContent {
+		t.Fatalf("expected placeholder at index 1, got %+v", roles[1])
+	}
+	if roles[2].Role != "assistant" || roles[2].Content != "done" {
+		t.Fatalf("expected assistant after placeholder, got %+v", roles[2])
 	}
 }

@@ -35,6 +35,89 @@ var version = "dev"
 
 var anthropicURL = "https://opencode.ai/zen/go/v1/messages"
 
+const (
+	remoteModelsURL   = "https://models.dev/api.json"
+	officialModelsURL = "https://opencode.ai/zen/go/v1/models"
+)
+
+// officialModelsResponse matches the OpenCode Go /v1/models response shape.
+type officialModelsResponse struct {
+	Data []struct {
+		ID string `json:"id"`
+	} `json:"data"`
+}
+
+// remoteModelInfo represents the subset of models.dev metadata ocgo needs.
+type remoteModelInfo struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Modalities struct {
+		Input  []string `json:"input"`
+		Output []string `json:"output"`
+	} `json:"modalities"`
+	Limit struct {
+		Context int `json:"context"`
+		Output  int `json:"output"`
+	} `json:"limit"`
+}
+
+// remoteAPIResponse is the top-level structure of the models.dev API response.
+type remoteAPIResponse struct {
+	OpenCodeGo struct {
+		Models map[string]remoteModelInfo `json:"models"`
+	} `json:"opencode-go"`
+}
+
+// httpClient is shared by short-lived metadata fetches. Long-running model
+// inference requests keep their larger per-request timeouts below.
+var httpClient = &http.Client{Timeout: 8 * time.Second}
+
+type lazyFetcher[T any] struct {
+	mu      sync.RWMutex
+	data    T
+	err     error
+	fetched bool
+	fetch   func() (T, error)
+}
+
+func newLazyFetcher[T any](fetch func() (T, error)) *lazyFetcher[T] {
+	return &lazyFetcher[T]{fetch: fetch}
+}
+
+func (f *lazyFetcher[T]) get() (T, error) {
+	f.mu.RLock()
+	if f.fetched {
+		data, err := f.data, f.err
+		f.mu.RUnlock()
+		return data, err
+	}
+	f.mu.RUnlock()
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fetched {
+		return f.data, f.err
+	}
+	f.data, f.err = f.fetch()
+	f.fetched = true
+	return f.data, f.err
+}
+
+func (f *lazyFetcher[T]) refresh() {
+	f.mu.Lock()
+	var zero T
+	f.data = zero
+	f.err = nil
+	f.fetched = false
+	f.mu.Unlock()
+	_, _ = f.get()
+}
+
+var (
+	remoteModels   = newLazyFetcher(fetchRemoteModels)
+	officialModels = newLazyFetcher(fetchOfficialModels)
+)
+
 type Config struct {
 	APIKey string `json:"api_key"`
 	Host   string `json:"host"`
@@ -203,6 +286,7 @@ func setupCmd() *cobra.Command {
 
 func listCmd() *cobra.Command {
 	return &cobra.Command{Use: "list", Aliases: []string{"ls", "models"}, Short: "List OpenCode Go models", Run: func(cmd *cobra.Command, args []string) {
+		refreshAllModels()
 		fmt.Println("OpenCode Go models:")
 		for _, m := range knownModelIDs() {
 			fmt.Printf("  %s\n", m)
@@ -210,8 +294,25 @@ func listCmd() *cobra.Command {
 	}}
 }
 
+var fallbackModelIDs = []string{"glm-5.1", "glm-5", "kimi-k2.6", "kimi-k2.5", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni", "minimax-m3", "minimax-m2.7", "minimax-m2.5", "deepseek-v4-pro", "deepseek-v4-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus"}
+
 func knownModelIDs() []string {
-	return []string{"glm-5.1", "glm-5", "kimi-k2.6", "kimi-k2.5", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni", "minimax-m3", "minimax-m2.7", "minimax-m2.5", "deepseek-v4-pro", "deepseek-v4-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus"}
+	if ids, err := getOfficialModels(); err == nil && len(ids) > 0 {
+		out := append([]string(nil), ids...)
+		sort.Strings(out)
+		return out
+	}
+	if models, err := getRemoteModels(); err == nil && len(models) > 0 {
+		out := make([]string, 0, len(models))
+		for id := range models {
+			if strings.TrimSpace(id) != "" {
+				out = append(out, id)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	return append([]string(nil), fallbackModelIDs...)
 }
 
 type openCodeModelMetadata struct {
@@ -244,14 +345,36 @@ func modelMetadata(model string) openCodeModelMetadata {
 		SupportedReasoning:      []any{},
 		DefaultReasoningSummary: "none",
 	}
+	if remote, err := getRemoteModels(); err == nil {
+		if rm, ok := remote[id]; ok {
+			if strings.TrimSpace(rm.Name) != "" {
+				meta.DisplayName = rm.Name
+				meta.Description = rm.Name + " via OpenCode Go"
+			}
+			if len(rm.Modalities.Input) > 0 {
+				meta.InputModalities = append([]string(nil), rm.Modalities.Input...)
+				meta.CodexInputModalities = codexSupportedModalities(rm.Modalities.Input)
+			}
+			if rm.Limit.Context > 0 {
+				meta.ContextWindow = rm.Limit.Context
+				meta.MaxContextWindow = rm.Limit.Context
+			}
+		}
+	}
 	switch id {
 	case "minimax-m3":
-		meta.DisplayName = "MiniMax M3"
-		meta.Description = "MiniMax M3 via OpenCode Go"
-		meta.InputModalities = []string{"text", "image", "video"}
-		meta.CodexInputModalities = []string{"text", "image"}
-		meta.ContextWindow = 512000
-		meta.MaxContextWindow = 512000
+		if meta.DisplayName == id {
+			meta.DisplayName = "MiniMax M3"
+			meta.Description = "MiniMax M3 via OpenCode Go"
+		}
+		if meta.ContextWindow == 128000 {
+			meta.ContextWindow = 512000
+			meta.MaxContextWindow = 512000
+		}
+		if len(meta.InputModalities) == 1 && meta.InputModalities[0] == "text" {
+			meta.InputModalities = []string{"text", "image", "video"}
+			meta.CodexInputModalities = []string{"text", "image"}
+		}
 		meta.UsesAnthropicEndpoint = true
 		meta.ParallelToolCalls = true
 	case "minimax-m2.7", "minimax-m2.5":
@@ -260,10 +383,102 @@ func modelMetadata(model string) openCodeModelMetadata {
 		meta.UsesAnthropicEndpoint = true
 		meta.SupportsSearchTool = true
 	case "kimi-k2.6", "kimi-k2.5", "mimo-v2-omni":
-		meta.InputModalities = []string{"text", "image"}
-		meta.CodexInputModalities = []string{"text", "image"}
+		if len(meta.InputModalities) == 1 && meta.InputModalities[0] == "text" {
+			meta.InputModalities = []string{"text", "image"}
+			meta.CodexInputModalities = []string{"text", "image"}
+		}
 	}
 	return meta
+}
+
+func codexSupportedModalities(modalities []string) []string {
+	out := make([]string, 0, len(modalities))
+	seen := map[string]bool{}
+	for _, modality := range modalities {
+		switch modality {
+		case "text", "image":
+			if !seen[modality] {
+				out = append(out, modality)
+				seen[modality] = true
+			}
+		}
+	}
+	if len(out) == 0 {
+		return []string{"text"}
+	}
+	return out
+}
+
+func fetchRemoteModels() (map[string]remoteModelInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteModelsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("remote models API returned status %d", resp.StatusCode)
+	}
+	var apiResp remoteAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode remote models: %w", err)
+	}
+	if apiResp.OpenCodeGo.Models == nil {
+		return nil, errors.New("remote models API returned no opencode-go models")
+	}
+	return apiResp.OpenCodeGo.Models, nil
+}
+
+func getRemoteModels() (map[string]remoteModelInfo, error) {
+	return remoteModels.get()
+}
+
+func fetchOfficialModels() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, officialModelsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("official models API returned status %d", resp.StatusCode)
+	}
+	var apiResp officialModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode official models: %w", err)
+	}
+	ids := make([]string, 0, len(apiResp.Data))
+	seen := map[string]bool{}
+	for _, m := range apiResp.Data {
+		id := strings.TrimSpace(m.ID)
+		if id != "" && !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	return ids, nil
+}
+
+func getOfficialModels() ([]string, error) {
+	return officialModels.get()
+}
+
+func refreshAllModels() {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); officialModels.refresh() }()
+	go func() { defer wg.Done(); remoteModels.refresh() }()
+	wg.Wait()
 }
 
 func defaultModelMappings() map[string]map[string]string {
@@ -1092,13 +1307,13 @@ func prepareChatBody(body []byte) ([]byte, error) {
 		changed = stripRawChatImageDetails(req) || changed
 	}
 	if !changed {
-		return body, nil
+		return sanitizeRawChatToolMessages(body), nil
 	}
 	out, err := json.Marshal(req)
 	if err != nil {
-		return body, nil
+		return sanitizeRawChatToolMessages(body), nil
 	}
-	return out, nil
+	return sanitizeRawChatToolMessages(out), nil
 }
 
 func applyRawChatReasoningEffort(req map[string]any) bool {
@@ -1294,7 +1509,7 @@ func responsesToChat(rr ResponsesRequest) OAIRequest {
 	if rr.Instructions != "" {
 		out.Messages = append(out.Messages, OAIMessage{Role: "system", Content: rr.Instructions})
 	}
-	out.Messages = append(out.Messages, responsesInputToMessages(rr.Input)...)
+	out.Messages = append(out.Messages, sanitizeOAIToolMessages(responsesInputToMessages(rr.Input))...)
 	for _, t := range rr.Tools {
 		if tool, ok := responseBuiltinToolToAnthropic(t); ok {
 			out.AnthropicTools = appendUniqueAnthropicTool(out.AnthropicTools, tool)
@@ -1612,6 +1827,181 @@ func responsesInputToMessages(raw json.RawMessage) []OAIMessage {
 
 func assistantToolCallsMessage(calls []OAIToolCall) OAIMessage {
 	return OAIMessage{Role: "assistant", ToolCalls: calls, ReasoningContent: cachedReasoningContent(calls)}
+}
+
+const unavailableToolResultContent = "Tool result unavailable."
+
+// sanitizeOAIToolMessages enforces the OpenAI-compatible invariant that an
+// assistant message with tool_calls is immediately followed by tool messages
+// for those exact call IDs. It drops orphan/late tool messages and inserts a
+// conservative placeholder for any missing result.
+func sanitizeOAIToolMessages(messages []OAIMessage) []OAIMessage {
+	if len(messages) == 0 {
+		return messages
+	}
+	out := make([]OAIMessage, 0, len(messages))
+	for i := 0; i < len(messages); {
+		m := messages[i]
+		if m.Role == "tool" {
+			// A tool message that is not consumed immediately after an assistant
+			// tool_calls message is orphaned or late and must not be forwarded.
+			i++
+			continue
+		}
+		out = append(out, m)
+		if m.Role != "assistant" || len(m.ToolCalls) == 0 {
+			i++
+			continue
+		}
+
+		expected := toolCallIDOrder(m.ToolCalls)
+		seen := map[string]bool{}
+		j := i + 1
+		for j < len(messages) && messages[j].Role == "tool" {
+			toolMsg := messages[j]
+			if containsString(expected, toolMsg.ToolCallID) && !seen[toolMsg.ToolCallID] {
+				out = append(out, toolMsg)
+				seen[toolMsg.ToolCallID] = true
+			}
+			j++
+		}
+		for _, id := range expected {
+			if !seen[id] {
+				out = append(out, OAIMessage{Role: "tool", ToolCallID: id, Content: unavailableToolResultContent})
+			}
+		}
+		i = j
+	}
+	return out
+}
+
+func toolCallIDOrder(calls []OAIToolCall) []string {
+	ids := make([]string, 0, len(calls))
+	seen := map[string]bool{}
+	for _, call := range calls {
+		id := strings.TrimSpace(call.ID)
+		if id != "" && !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	return ids
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+// sanitizeRawChatToolMessages sanitizes a raw chat-completions request while
+// preserving unknown top-level and per-message fields. It only rebuilds the
+// messages array when it actually needs to drop an orphan/late tool message or
+// insert a placeholder for a missing result.
+func sanitizeRawChatToolMessages(body []byte) []byte {
+	var req map[string]json.RawMessage
+	if json.Unmarshal(body, &req) != nil {
+		return body
+	}
+	rawMessages, ok := req["messages"]
+	if !ok {
+		return body
+	}
+	var messages []json.RawMessage
+	if json.Unmarshal(rawMessages, &messages) != nil {
+		return body
+	}
+	sanitized, changed := sanitizeRawChatMessages(messages)
+	if !changed {
+		return body
+	}
+	newMessages, err := json.Marshal(sanitized)
+	if err != nil {
+		return body
+	}
+	req["messages"] = newMessages
+	out, err := json.Marshal(req)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+func sanitizeRawChatMessages(messages []json.RawMessage) ([]json.RawMessage, bool) {
+	out := make([]json.RawMessage, 0, len(messages))
+	changed := false
+	for i := 0; i < len(messages); {
+		msg := parseRawChatMessage(messages[i])
+		if msg.Role == "tool" {
+			changed = true
+			i++
+			continue
+		}
+		out = append(out, messages[i])
+		if msg.Role != "assistant" || len(msg.ToolCallIDs) == 0 {
+			i++
+			continue
+		}
+
+		seen := map[string]bool{}
+		j := i + 1
+		for j < len(messages) {
+			next := parseRawChatMessage(messages[j])
+			if next.Role != "tool" {
+				break
+			}
+			if containsString(msg.ToolCallIDs, next.ToolCallID) && !seen[next.ToolCallID] {
+				out = append(out, messages[j])
+				seen[next.ToolCallID] = true
+			} else {
+				changed = true
+			}
+			j++
+		}
+		for _, id := range msg.ToolCallIDs {
+			if !seen[id] {
+				out = append(out, rawToolPlaceholderMessage(id))
+				changed = true
+			}
+		}
+		i = j
+	}
+	return out, changed
+}
+
+type rawChatMessageInfo struct {
+	Role        string
+	ToolCallID  string
+	ToolCallIDs []string
+}
+
+func parseRawChatMessage(raw json.RawMessage) rawChatMessageInfo {
+	var msg struct {
+		Role       string `json:"role"`
+		ToolCallID string `json:"tool_call_id"`
+		ToolCalls  []struct {
+			ID string `json:"id"`
+		} `json:"tool_calls"`
+	}
+	_ = json.Unmarshal(raw, &msg)
+	info := rawChatMessageInfo{Role: msg.Role, ToolCallID: msg.ToolCallID}
+	seen := map[string]bool{}
+	for _, call := range msg.ToolCalls {
+		id := strings.TrimSpace(call.ID)
+		if id != "" && !seen[id] {
+			info.ToolCallIDs = append(info.ToolCallIDs, id)
+			seen[id] = true
+		}
+	}
+	return info
+}
+
+func rawToolPlaceholderMessage(callID string) json.RawMessage {
+	b, _ := json.Marshal(map[string]any{"role": "tool", "tool_call_id": callID, "content": unavailableToolResultContent})
+	return b
 }
 
 func cachedReasoningContent(calls []OAIToolCall) string {
