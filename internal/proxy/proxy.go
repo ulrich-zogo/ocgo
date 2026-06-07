@@ -369,20 +369,28 @@ func EnsureAnthropicRequestDefaults(ar *compat.AnthropicRequest) {
 }
 
 func PrepareChatBody(body []byte) ([]byte, error) {
+	body = compat.SanitizeRawChatToolMessages(body)
+
 	var req map[string]any
 	if err := json.Unmarshal(body, &req); err != nil {
 		return body, nil
 	}
 
-	var opts *compat.OAIStreamOptions
-	if raw, ok := req["stream_options"]; ok {
-		b, _ := json.Marshal(raw)
-		json.Unmarshal(b, &opts)
-	}
-	if opts != nil && opts.IncludeUsage {
-		if req["stream"] == true {
+	if req["stream"] == true {
+		if raw, ok := req["stream_options"]; ok {
+			var opts compat.OAIStreamOptions
+			b, _ := json.Marshal(raw)
+			json.Unmarshal(b, &opts)
+			req["stream_options"] = map[string]any{"include_usage": true}
+			for k, v := range raw.(map[string]any) {
+				if k != "include_usage" {
+					req["stream_options"].(map[string]any)[k] = v
+				}
+			}
+		} else {
 			req["stream_options"] = map[string]any{"include_usage": true}
 		}
+		body, _ = json.Marshal(req)
 	}
 
 	if ApplyRawChatReasoningEffort(req) {
@@ -394,6 +402,8 @@ func PrepareChatBody(body []byte) ([]byte, error) {
 		req["reasoning_effort"] = effort
 		delete(req, "reasoning_level")
 		delete(req, "reasoning_depth")
+		delete(req, "thinking")
+		delete(req, "thinking_budget")
 		body, _ = json.Marshal(req)
 	}
 
@@ -844,7 +854,7 @@ func ValidateImageSupport(or compat.OAIRequest) error {
 		return nil
 	}
 	if !models.SupportsImages(or.Model) {
-		return errors.New("model " + or.Model + " does not support images")
+		return errors.New("model " + or.Model + " does not support image inputs")
 	}
 	return nil
 }
