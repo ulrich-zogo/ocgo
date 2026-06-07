@@ -206,14 +206,14 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 		want string
 	}{
 		{in: "minimal", want: "minimal"},
-		{in: "0", want: "0"},
+		{in: "0", want: "minimal"},
 		{in: "low", want: "low"},
-		{in: "1", want: "1"},
+		{in: "1", want: "low"},
 		{in: "medium", want: "medium"},
-		{in: "2", want: "2"},
+		{in: "2", want: "medium"},
 		{in: "high", want: "high"},
-		{in: "xhigh", want: "xhigh"},
-		{in: "max", want: "max"},
+		{in: "xhigh", want: "high"},
+		{in: "max", want: "high"},
 	} {
 		if got := NormalizeReasoningEffort(tc.in); got != tc.want {
 			t.Fatalf("NormalizeReasoningEffort(%q) = %q, want %q", tc.in, got, tc.want)
@@ -227,10 +227,10 @@ func TestReasoningEffortExtraction(t *testing.T) {
 		want string
 	}{
 		{raw: []byte(`"low"`), want: "low"},
-		{raw: []byte(`3`), want: "medium"},
+		{raw: []byte(`3`), want: "high"},
 		{raw: []byte(`{"level":"medium"}`), want: "medium"},
-		{raw: []byte(`{"type":"enabled"}`), want: "medium"},
-		{raw: []byte(`{"reasoning":{"depth":1}}`), want: "medium"},
+		{raw: []byte(`{"type":"enabled"}`), want: "high"},
+		{raw: []byte(`{"reasoning":{"depth":1}}`), want: "low"},
 	} {
 		if got := ReasoningEffortFromRaw(tc.raw); got != tc.want {
 			t.Fatalf("ReasoningEffortFromRaw(%s) = %q, want %q", string(tc.raw), got, tc.want)

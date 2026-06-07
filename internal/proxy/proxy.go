@@ -78,8 +78,9 @@ func ProxyMessages(w http.ResponseWriter, r *http.Request, cfg config.Config) {
 
 	model := ar.Model
 
-	if strings.HasPrefix(model, "claude") || strings.HasPrefix(model, "anthropic") {
-		ar.Model = mapping.ResolveToolModel("claude", model)
+	if models.UsesAnthropicEndpoint(ar.Model) {
+		ar.Model = models.NormalizeID(ar.Model)
+		EnsureAnthropicRequestDefaults(&ar)
 		resp, err := ForwardAnthropic(r.Context(), cfg, ar)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("forward: %v", err), http.StatusBadGateway)
@@ -163,7 +164,7 @@ func ProxyChatCompletions(w http.ResponseWriter, r *http.Request, cfg config.Con
 
 	model, _ := reqMap["model"].(string)
 
-	if strings.HasPrefix(model, "claude") || strings.HasPrefix(model, "anthropic") {
+	if models.UsesAnthropicEndpoint(model) {
 		var or compat.OAIRequest
 		if err := json.Unmarshal(body, &or); err != nil {
 			http.Error(w, fmt.Sprintf("parse OAI request: %v", err), http.StatusBadRequest)
@@ -191,8 +192,16 @@ func ProxyChatCompletions(w http.ResponseWriter, r *http.Request, cfg config.Con
 		return
 	}
 
-	model = mapping.ResolveToolModel("codex", model)
-	body = bytes.Replace(body, []byte(`"`+reqMap["model"].(string)+`"`), []byte(`"`+model+`"`), 1)
+	mapped := mapping.ResolveToolModel("codex", model)
+	if mapped != model {
+		reqMap["model"] = mapped
+		var err error
+		body, err = json.Marshal(reqMap)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("marshal request: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
 
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, config.OpenAIURL, bytes.NewReader(body))
 	if err != nil {
@@ -235,7 +244,7 @@ func ProxyResponses(w http.ResponseWriter, r *http.Request, cfg config.Config) {
 		return
 	}
 
-	if strings.HasPrefix(model, "claude") || strings.HasPrefix(model, "anthropic") {
+	if models.UsesAnthropicEndpoint(model) {
 		ar := ChatToAnthropic(or)
 		ar.Model = mapping.ResolveToolModel("claude", model)
 
@@ -362,7 +371,7 @@ func EnsureAnthropicRequestDefaults(ar *compat.AnthropicRequest) {
 func PrepareChatBody(body []byte) ([]byte, error) {
 	var req map[string]any
 	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, fmt.Errorf("parse body: %w", err)
+		return body, nil
 	}
 
 	var opts *compat.OAIStreamOptions
@@ -651,11 +660,10 @@ func convertAnthropicToOAI(ar compat.AnthropicRequest) compat.OAIRequest {
 	if ar.Thinking != nil {
 		or.ReasoningEffort = "medium"
 	}
-	if effort := compat.ReasoningEffortFromRaw(ar.ReasoningEffort); effort != "" {
-		or.ReasoningEffort = effort
-	}
-	if effort := compat.ReasoningEffortFromRaw(ar.Effort); effort != "" && or.ReasoningEffort == "" {
-		or.ReasoningEffort = effort
+	for _, raw := range []json.RawMessage{ar.Reasoning, ar.ReasoningEffort, ar.Effort, ar.Level, ar.Depth, ar.OutputConfig} {
+		if effort := compat.ReasoningEffortFromRaw(raw); effort != "" && or.ReasoningEffort == "" {
+			or.ReasoningEffort = effort
+		}
 	}
 
 	return or
@@ -697,8 +705,10 @@ func convertResponsesToChat(rr compat.ResponsesRequest) compat.OAIRequest {
 	if rr.Thinking != nil {
 		or.ReasoningEffort = "medium"
 	}
-	if effort := compat.ReasoningEffortFromRaw(rr.ReasoningEffort); effort != "" {
-		or.ReasoningEffort = effort
+	for _, raw := range []json.RawMessage{rr.Reasoning, rr.ReasoningEffort, rr.Effort, rr.Level, rr.Depth, rr.OutputConfig} {
+		if effort := compat.ReasoningEffortFromRaw(raw); effort != "" && or.ReasoningEffort == "" {
+			or.ReasoningEffort = effort
+		}
 	}
 
 	return or

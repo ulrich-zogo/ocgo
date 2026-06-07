@@ -111,8 +111,12 @@ func TestConvertedStreamingRequestsAskForUsage(t *testing.T) {
 
 func TestConvertedRequestsForwardReasoningEffort(t *testing.T) {
 	anthropic := ConvertRequest(compat.AnthropicRequest{Model: "glm-5.1", Reasoning: []byte(`{"effort":"high"}`), Messages: []compat.AMessage{{Role: "user", Content: []byte(`[{"type":"text","text":"hello"}]`)}}})
-	if anthropic.ReasoningEffort != "medium" {
-		t.Fatalf("anthropic reasoning effort = %q, want medium", anthropic.ReasoningEffort)
+	if anthropic.ReasoningEffort != "high" {
+		t.Fatalf("anthropic reasoning effort = %q, want high", anthropic.ReasoningEffort)
+	}
+	responses := ResponsesToChat(compat.ResponsesRequest{Model: "glm-5.1", OutputConfig: []byte(`{"reasoning":{"depth":2}}`), Input: []byte(`[{"type":"message","role":"user","content":"hello"}]`)})
+	if responses.ReasoningEffort != "medium" {
+		t.Fatalf("responses reasoning effort = %q, want medium", responses.ReasoningEffort)
 	}
 }
 

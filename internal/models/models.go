@@ -3,7 +3,6 @@ package models
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -111,7 +110,7 @@ func fetchRemoteModels() (map[string]remoteModelInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("remote models API returned non-200 status")
+		return nil, fmt.Errorf("remote models API returned status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -137,6 +136,10 @@ func fetchOfficialModels() ([]string, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("official models API returned status %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -170,38 +173,24 @@ func NormalizeID(id string) string {
 }
 
 func KnownIDs() []string {
-	seen := make(map[string]struct{})
-	var result []string
+	if ids, err := getOfficialModels(); err == nil && len(ids) > 0 {
+		out := append([]string(nil), ids...)
+		sort.Strings(out)
+		return out
+	}
 
-	official, err := getOfficialModels()
-	if err == nil {
-		for _, id := range official {
-			if _, ok := seen[id]; !ok {
-				seen[id] = struct{}{}
-				result = append(result, id)
+	if models, err := getRemoteModels(); err == nil && len(models) > 0 {
+		out := make([]string, 0, len(models))
+		for id := range models {
+			if strings.TrimSpace(id) != "" {
+				out = append(out, id)
 			}
 		}
+		sort.Strings(out)
+		return out
 	}
 
-	remote, err := getRemoteModels()
-	if err == nil {
-		for id := range remote {
-			if _, ok := seen[id]; !ok {
-				seen[id] = struct{}{}
-				result = append(result, id)
-			}
-		}
-	}
-
-	for _, id := range fallbackModelIDs {
-		if _, ok := seen[id]; !ok {
-			seen[id] = struct{}{}
-			result = append(result, id)
-		}
-	}
-
-	sort.Strings(result)
-	return result
+	return append([]string(nil), fallbackModelIDs...)
 }
 
 func IsKnown(id string) bool {
@@ -246,128 +235,77 @@ type ModelMetadata struct {
 }
 
 func Metadata(model string) ModelMetadata {
-	switch NormalizeID(model) {
-	case "minimax-m3":
-		return ModelMetadata{
-			DisplayName:           "MiniMax M3",
-			Description:           "MiniMax M3 model",
-			InputModalities:       []string{"text", "image"},
-			CodexInputModalities:  []string{"text", "image"},
-			ContextWindow:         1048576,
-			MaxContextWindow:      1048576,
-			UsesAnthropicEndpoint: false,
-			ParallelToolCalls:     true,
-			SupportsImageOriginal: true,
-			SupportsSearchTool:    true,
-			SupportedReasoning:    []any{},
-			DefaultReasoningLevel: nil,
-			ReasoningSummaries:    false,
-			DefaultReasoningSummary: "",
-		}
-	case "minimax-m2.7":
-		return ModelMetadata{
-			DisplayName:           "MiniMax M2.7",
-			Description:           "MiniMax M2.7 model",
-			InputModalities:       []string{"text", "image"},
-			CodexInputModalities:  []string{"text", "image"},
-			ContextWindow:         262144,
-			MaxContextWindow:      262144,
-			UsesAnthropicEndpoint: false,
-			ParallelToolCalls:     true,
-			SupportsImageOriginal: true,
-			SupportsSearchTool:    true,
-			SupportedReasoning:    []any{},
-			DefaultReasoningLevel: nil,
-			ReasoningSummaries:    false,
-			DefaultReasoningSummary: "",
-		}
-	case "minimax-m2.5":
-		return ModelMetadata{
-			DisplayName:           "MiniMax M2.5",
-			Description:           "MiniMax M2.5 model",
-			InputModalities:       []string{"text", "image"},
-			CodexInputModalities:  []string{"text", "image"},
-			ContextWindow:         262144,
-			MaxContextWindow:      262144,
-			UsesAnthropicEndpoint: false,
-			ParallelToolCalls:     true,
-			SupportsImageOriginal: true,
-			SupportsSearchTool:    true,
-			SupportedReasoning:    []any{},
-			DefaultReasoningLevel: nil,
-			ReasoningSummaries:    false,
-			DefaultReasoningSummary: "",
-		}
-	case "qwen3.7-max":
-		return ModelMetadata{
-			DisplayName:           "Qwen 3.7 Max",
-			Description:           "Qwen 3.7 Max model",
-			InputModalities:       []string{"text", "image"},
-			CodexInputModalities:  []string{"text", "image"},
-			ContextWindow:         131072,
-			MaxContextWindow:      131072,
-			UsesAnthropicEndpoint: false,
-			ParallelToolCalls:     true,
-			SupportsImageOriginal: true,
-			SupportsSearchTool:    true,
-			SupportedReasoning:    []any{},
-			DefaultReasoningLevel: nil,
-			ReasoningSummaries:    false,
-			DefaultReasoningSummary: "",
-		}
-	case "kimi-k2.6":
-		return ModelMetadata{
-			DisplayName:           "Kimi K2.6",
-			Description:           "Kimi K2.6 model",
-			InputModalities:       []string{"text", "image"},
-			CodexInputModalities:  []string{"text", "image"},
-			ContextWindow:         131072,
-			MaxContextWindow:      131072,
-			UsesAnthropicEndpoint: false,
-			ParallelToolCalls:     true,
-			SupportsImageOriginal: true,
-			SupportsSearchTool:    true,
-			SupportedReasoning:    []any{},
-			DefaultReasoningLevel: nil,
-			ReasoningSummaries:    false,
-			DefaultReasoningSummary: "",
-		}
-	case "kimi-k2.5":
-		return ModelMetadata{
-			DisplayName:           "Kimi K2.5",
-			Description:           "Kimi K2.5 model",
-			InputModalities:       []string{"text", "image"},
-			CodexInputModalities:  []string{"text", "image"},
-			ContextWindow:         131072,
-			MaxContextWindow:      131072,
-			UsesAnthropicEndpoint: false,
-			ParallelToolCalls:     true,
-			SupportsImageOriginal: true,
-			SupportsSearchTool:    true,
-			SupportedReasoning:    []any{},
-			DefaultReasoningLevel: nil,
-			ReasoningSummaries:    false,
-			DefaultReasoningSummary: "",
-		}
-	case "mimo-v2-omni":
-		return ModelMetadata{
-			DisplayName:           "MIMO V2 Omni",
-			Description:           "MIMO V2 Omni model",
-			InputModalities:       []string{"text", "image"},
-			CodexInputModalities:  []string{"text", "image"},
-			ContextWindow:         131072,
-			MaxContextWindow:      131072,
-			UsesAnthropicEndpoint: false,
-			ParallelToolCalls:     true,
-			SupportsImageOriginal: true,
-			SupportsSearchTool:    true,
-			SupportedReasoning:    []any{},
-			DefaultReasoningLevel: nil,
-			ReasoningSummaries:    false,
-			DefaultReasoningSummary: "",
+	id := NormalizeID(model)
+
+	meta := ModelMetadata{
+		DisplayName:             id,
+		Description:             "OpenCode Go model",
+		InputModalities:         []string{"text"},
+		CodexInputModalities:    []string{"text"},
+		ContextWindow:           128000,
+		MaxContextWindow:        128000,
+		DefaultReasoningSummary: "none",
+	}
+
+	if remote, err := getRemoteModels(); err == nil {
+		if info, ok := remote[id]; ok {
+			if info.Name != "" {
+				meta.DisplayName = info.Name
+				meta.Description = info.Name + " via OpenCode Go"
+			}
+			if len(info.Modalities.Input) > 0 {
+				meta.InputModalities = append([]string(nil), info.Modalities.Input...)
+				meta.CodexInputModalities = CodexSupportedModalities(info.Modalities.Input)
+			}
+			if info.Limit.Context > 0 {
+				meta.ContextWindow = info.Limit.Context
+				meta.MaxContextWindow = info.Limit.Context
+			}
 		}
 	}
-	return ModelMetadata{}
+
+	switch id {
+	case "minimax-m3":
+		meta.UsesAnthropicEndpoint = true
+		meta.ParallelToolCalls = true
+		meta.SupportsImageOriginal = true
+		meta.SupportsSearchTool = true
+		if meta.ContextWindow == 128000 {
+			meta.ContextWindow = 512000
+		}
+		if meta.MaxContextWindow == 128000 {
+			meta.MaxContextWindow = 512000
+		}
+	case "minimax-m2.7":
+		meta.UsesAnthropicEndpoint = true
+		meta.ParallelToolCalls = true
+		meta.SupportsImageOriginal = true
+		meta.SupportsSearchTool = true
+	case "minimax-m2.5":
+		meta.UsesAnthropicEndpoint = true
+		meta.ParallelToolCalls = true
+		meta.SupportsImageOriginal = true
+		meta.SupportsSearchTool = true
+	case "qwen3.7-max":
+		meta.UsesAnthropicEndpoint = true
+		meta.ParallelToolCalls = true
+		meta.SupportsImageOriginal = true
+		meta.SupportsSearchTool = true
+	case "kimi-k2.6":
+		meta.ParallelToolCalls = true
+		meta.SupportsImageOriginal = true
+		meta.SupportsSearchTool = true
+	case "kimi-k2.5":
+		meta.ParallelToolCalls = true
+		meta.SupportsImageOriginal = true
+		meta.SupportsSearchTool = true
+	case "mimo-v2-omni":
+		meta.ParallelToolCalls = true
+		meta.SupportsImageOriginal = true
+		meta.SupportsSearchTool = true
+	}
+
+	return meta
 }
 
 func UsesAnthropicEndpoint(id string) bool {

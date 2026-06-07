@@ -937,29 +937,98 @@ func AssistantToolCallsMessage(calls []OAIToolCall) OAIMessage {
 
 func NormalizeReasoningEffort(effort string) string {
 	switch strings.ToLower(effort) {
-	case "minimal", "low", "medium", "high":
-		return strings.ToLower(effort)
+	case "0", "minimal", "min", "none", "off", "disabled", "false":
+		return "minimal"
+	case "1", "low", "light":
+		return "low"
+	case "2", "medium", "med", "normal", "default":
+		return "medium"
+	case "3", "4", "high", "xhigh", "max", "maximum", "deep", "true", "enabled":
+		return "high"
 	default:
 		if effort == "" {
-			return "medium"
+			return ""
 		}
 		return strings.ToLower(effort)
 	}
 }
 
 func ReasoningEffortFromRaw(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		return NormalizeReasoningEffort(s)
 	}
-	return "medium"
+
+	var n float64
+	if json.Unmarshal(raw, &n) == nil {
+		return NormalizeReasoningEffort(FormatReasoningNumber(n))
+	}
+
+	var obj map[string]any
+	if json.Unmarshal(raw, &obj) != nil {
+		return ""
+	}
+
+	for _, key := range []string{"reasoning_effort", "effort", "level", "depth"} {
+		if v, ok := obj[key]; ok {
+			if r := ReasoningEffortFromAny(v); r != "" {
+				return r
+			}
+		}
+	}
+
+	if t, ok := obj["type"].(string); ok && strings.ToLower(t) == "enabled" {
+		return "high"
+	}
+
+	for _, nest := range []string{"reasoning", "thinking", "output_config"} {
+		if v, ok := obj[nest]; ok {
+			if r := ReasoningEffortFromAny(v); r != "" {
+				return r
+			}
+		}
+	}
+
+	return ""
 }
 
 func ReasoningEffortFromAny(v any) string {
+	if v == nil {
+		return ""
+	}
 	if s, ok := v.(string); ok {
 		return NormalizeReasoningEffort(s)
 	}
-	return "medium"
+	if n, ok := v.(float64); ok {
+		return NormalizeReasoningEffort(FormatReasoningNumber(n))
+	}
+	if raw, ok := v.(json.RawMessage); ok {
+		return ReasoningEffortFromRaw(raw)
+	}
+	if obj, ok := v.(map[string]any); ok {
+		for _, key := range []string{"reasoning_effort", "effort", "level", "depth"} {
+			if val, ok := obj[key]; ok {
+				if r := ReasoningEffortFromAny(val); r != "" {
+					return r
+				}
+			}
+		}
+		if t, ok := obj["type"].(string); ok && strings.ToLower(t) == "enabled" {
+			return "high"
+		}
+		for _, nest := range []string{"reasoning", "thinking", "output_config"} {
+			if val, ok := obj[nest]; ok {
+				if r := ReasoningEffortFromAny(val); r != "" {
+					return r
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func FormatReasoningNumber(n float64) string {
