@@ -1,0 +1,23 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+)
+
+const CodexProfileName = "ocgo-launch"
+
+func CodexConfigFile() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex", "config.toml")
+}
+
+func CodexProfileConfigFile() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex", CodexProfileName+".config.toml")
+}
+
+func CodexModelCatalogFile() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex", "ocgo-models.json")
+}

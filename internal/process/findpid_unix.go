@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package process
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func findListenerPID(port int) (int, error) {
+func FindListenerPID(port int) (int, error) {
 	if port == 0 {
 		return 0, errors.New("missing port")
 	}
