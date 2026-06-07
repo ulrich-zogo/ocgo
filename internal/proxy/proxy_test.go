@@ -400,6 +400,48 @@ func TestStreamAnthropicForwardsToolCalls(t *testing.T) {
 	}
 }
 
+func TestHealthEndpoint(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok\n"))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want 200", w.Code)
+	}
+	if w.Body.String() != "ok\n" {
+		t.Fatalf("health body = %q, want %q", w.Body.String(), "ok\n")
+	}
+}
+
+func TestCountTokensEndpointPath(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/messages/count_tokens", CountTokens)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("count_tokens status = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"input_tokens"`) {
+		t.Fatalf("count_tokens body missing input_tokens: %s", w.Body.String())
+	}
+
+	// Verify /v1/count_tokens is not registered
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/count_tokens", nil)
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusNotFound {
+		t.Fatalf("unexpected /v1/count_tokens status = %d, want 404", w2.Code)
+	}
+}
+
 func TestStreamResponsesForwardsToolCalls(t *testing.T) {
 	compat.ReasoningContentCache.Lock()
 	compat.ReasoningContentCache.ByCallID = map[string]string{}
