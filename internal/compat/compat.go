@@ -981,8 +981,13 @@ func ReasoningEffortFromRaw(raw json.RawMessage) string {
 		}
 	}
 
-	if t, ok := obj["type"].(string); ok && strings.ToLower(t) == "enabled" {
-		return "high"
+	if t, ok := obj["type"].(string); ok {
+		switch strings.ToLower(t) {
+		case "enabled":
+			return "high"
+		case "disabled":
+			return "minimal"
+		}
 	}
 
 	for _, nest := range []string{"reasoning", "thinking", "output_config"} {
@@ -1017,8 +1022,13 @@ func ReasoningEffortFromAny(v any) string {
 				}
 			}
 		}
-		if t, ok := obj["type"].(string); ok && strings.ToLower(t) == "enabled" {
-			return "high"
+		if t, ok := obj["type"].(string); ok {
+			switch strings.ToLower(t) {
+			case "enabled":
+				return "high"
+			case "disabled":
+				return "minimal"
+			}
 		}
 		for _, nest := range []string{"reasoning", "thinking", "output_config"} {
 			if val, ok := obj[nest]; ok {

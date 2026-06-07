@@ -464,28 +464,57 @@ func ApplyRawChatReasoningEffort(req map[string]any) bool {
 		return false
 	}
 	req["reasoning_effort"] = effort
-	delete(req, "reasoning_level")
-	delete(req, "reasoning_depth")
-	delete(req, "thinking")
-	delete(req, "thinking_budget")
+	for _, key := range []string{
+		"reasoning",
+		"thinking",
+		"thinking_budget",
+		"output_config",
+		"effort",
+		"level",
+		"depth",
+		"reasoning_level",
+		"reasoning_depth",
+	} {
+		delete(req, key)
+	}
 	return true
 }
 
 func RawChatReasoningEffort(req map[string]any) string {
-	if e, ok := req["reasoning_effort"].(string); ok && e != "" {
-		return e
+	if v, ok := req["reasoning_effort"]; ok {
+		if e := compat.ReasoningEffortFromAny(v); e != "" {
+			return e
+		}
 	}
-	if e, ok := req["reasoning_level"].(string); ok && e != "" {
-		return e
+	if v, ok := req["reasoning"]; ok {
+		if e := compat.ReasoningEffortFromAny(v); e != "" {
+			return e
+		}
 	}
-	if e, ok := req["reasoning_depth"].(string); ok && e != "" {
-		return e
+	if v, ok := req["thinking"]; ok {
+		if e := compat.ReasoningEffortFromAny(v); e != "" {
+			return e
+		}
 	}
-	if e, ok := req["effort"].(string); ok && e != "" {
-		return e
+	if v, ok := req["output_config"]; ok {
+		if e := compat.ReasoningEffortFromAny(v); e != "" {
+			return e
+		}
 	}
-	if _, ok := req["thinking"]; ok {
-		return "medium"
+	if v, ok := req["effort"]; ok {
+		if e := compat.ReasoningEffortFromAny(v); e != "" {
+			return e
+		}
+	}
+	if v, ok := req["level"]; ok {
+		if e := compat.ReasoningEffortFromAny(v); e != "" {
+			return e
+		}
+	}
+	if v, ok := req["depth"]; ok {
+		if e := compat.ReasoningEffortFromAny(v); e != "" {
+			return e
+		}
 	}
 
 	messages, ok := req["messages"].([]any)
@@ -508,10 +537,21 @@ func RawChatReasoningEffort(req map[string]any) string {
 				if !ok {
 					continue
 				}
-				typ, _ := b["type"].(string)
-				if typ == "thinking" {
-					return "medium"
+				if typ, ok := b["type"].(string); ok {
+					switch strings.ToLower(typ) {
+					case "thinking":
+						return "medium"
+					case "redacted_thinking":
+						return "medium"
+					}
 				}
+				if e := compat.ReasoningEffortFromAny(b); e != "" {
+					return e
+				}
+			}
+		default:
+			if e := compat.ReasoningEffortFromAny(c); e != "" {
+				return e
 			}
 		}
 	}

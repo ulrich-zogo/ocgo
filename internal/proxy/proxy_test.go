@@ -195,12 +195,135 @@ func TestRawChatReasoningEffortPassThrough(t *testing.T) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		t.Fatal(err)
 	}
-	if req["reasoning_effort"] != "medium" {
-		t.Fatalf("reasoning_effort = %v, want medium in %s", req["reasoning_effort"], string(body))
+	if req["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort = %v, want high (from reasoning.effort=xhigh) in %s", req["reasoning_effort"], string(body))
 	}
-	if _, ok := req["thinking"]; ok {
-		t.Fatalf("thinking should be stripped from forwarded chat body: %s", string(body))
+	for _, removed := range []string{"reasoning", "thinking", "thinking_budget", "output_config", "effort", "level", "depth", "reasoning_level", "reasoning_depth"} {
+		if _, ok := req[removed]; ok {
+			t.Fatalf("%s should be stripped from forwarded chat body: %s", removed, string(body))
+		}
 	}
+}
+
+func TestRawChatReasoningEffortExtraction(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "reasoning_effort normal",
+			body: `{"model":"k","reasoning_effort":"normal","messages":[]}`,
+			want: "medium",
+		},
+		{
+			name: "reasoning effort xhigh",
+			body: `{"model":"k","reasoning":{"effort":"xhigh"},"messages":[]}`,
+			want: "high",
+		},
+		{
+			name: "thinking type enabled",
+			body: `{"model":"k","thinking":{"type":"enabled"},"messages":[]}`,
+			want: "high",
+		},
+		{
+			name: "output_config reasoning depth 2",
+			body: `{"model":"k","output_config":{"reasoning":{"depth":2}},"messages":[]}`,
+			want: "medium",
+		},
+		{
+			name: "effort max",
+			body: `{"model":"k","effort":"max","messages":[]}`,
+			want: "high",
+		},
+		{
+			name: "level 1",
+			body: `{"model":"k","level":1,"messages":[]}`,
+			want: "low",
+		},
+		{
+			name: "depth deep",
+			body: `{"model":"k","depth":"deep","messages":[]}`,
+			want: "high",
+		},
+		{
+			name: "reasoning type disabled",
+			body: `{"model":"k","reasoning":{"type":"disabled"},"messages":[]}`,
+			want: "minimal",
+		},
+		{
+			name: "reasoning effort 0",
+			body: `{"model":"k","reasoning_effort":"0","messages":[]}`,
+			want: "minimal",
+		},
+		{
+			name: "reasoning effort 3",
+			body: `{"model":"k","reasoning_effort":"3","messages":[]}`,
+			want: "high",
+		},
+		{
+			name: "effort xhigh",
+			body: `{"model":"k","effort":"xhigh","messages":[]}`,
+			want: "high",
+		},
+		{
+			name: "no effort fields",
+			body: `{"model":"k","messages":[]}`,
+			want: "",
+		},
+		{
+			name: "thinking block in messages",
+			body: `{"model":"k","messages":[{"role":"user","content":[{"type":"text","text":"hi"},{"type":"thinking","thinking":"hidden"}]}]}`,
+			want: "medium",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RawChatReasoningEffort(parseRawChatBody(t, tc.body))
+			if got != tc.want {
+				t.Fatalf("RawChatReasoningEffort(%s) = %q, want %q", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyRawChatReasoningEffortDeletesAllFields(t *testing.T) {
+	req := parseRawChatBody(t, `{
+		"model":"k",
+		"reasoning":{"effort":"xhigh"},
+		"thinking":{"type":"enabled"},
+		"output_config":{"reasoning":{"depth":2}},
+		"effort":"max",
+		"level":1,
+		"depth":"deep",
+		"thinking_budget":1024,
+		"reasoning_level":"high",
+		"reasoning_depth":2,
+		"messages":[]
+	}`)
+	if !ApplyRawChatReasoningEffort(req) {
+		t.Fatal("ApplyRawChatReasoningEffort should return true")
+	}
+	if req["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort = %v, want high", req["reasoning_effort"])
+	}
+	for _, removed := range []string{
+		"reasoning", "thinking", "thinking_budget", "output_config",
+		"effort", "level", "depth",
+		"reasoning_level", "reasoning_depth",
+	} {
+		if _, ok := req[removed]; ok {
+			t.Fatalf("%s should be deleted, got %+v", removed, req[removed])
+		}
+	}
+}
+
+func parseRawChatBody(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	var req map[string]any
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	return req
 }
 
 func TestConvertedStreamingRequestsAskForUsage(t *testing.T) {
