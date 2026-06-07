@@ -26,6 +26,10 @@ func StartServerProcess(detached bool) (*exec.Cmd, error) {
 
 	cmd := exec.Command(exe, "serve")
 
+	if err := os.MkdirAll(config.ConfigDir(), 0755); err != nil {
+		return nil, fmt.Errorf("failed to create config dir: %w", err)
+	}
+
 	logFile := config.LogFile()
 	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
@@ -91,7 +95,8 @@ func StopManagedServer(cmd *exec.Cmd) {
 }
 
 func Healthy(base string) bool {
-	resp, err := http.Get(base + "/health")
+	c := http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := c.Get(base + "/health")
 	if err != nil {
 		return false
 	}

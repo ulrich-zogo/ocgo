@@ -36,18 +36,22 @@ func RunServer(cfg config.Config) error {
 	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
 		return fmt.Errorf("write pid file: %w", err)
 	}
+	defer os.Remove(pidPath)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok\n"))
+	})
 	mux.HandleFunc("/v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		ProxyMessages(w, r, cfg)
 	})
+	mux.HandleFunc("/v1/messages/count_tokens", CountTokens)
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		ProxyChatCompletions(w, r, cfg)
 	})
 	mux.HandleFunc("/v1/responses", func(w http.ResponseWriter, r *http.Request) {
 		ProxyResponses(w, r, cfg)
 	})
-	mux.HandleFunc("/v1/count_tokens", CountTokens)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	fmt.Printf("ocgo proxy listening on http://%s\n", addr)
