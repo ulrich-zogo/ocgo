@@ -1,9 +1,9 @@
 //go:build !windows
 
-package main
+package process
 
 import "syscall"
 
-func detachedAttrs() *syscall.SysProcAttr {
+func DetachedAttrs() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setsid: true}
 }

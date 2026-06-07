@@ -1,4 +1,4 @@
-package main
+package process
 
 import (
 	"errors"
@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func parseWindowsNetstatPID(output string, port int) (int, error) {
+func ParseWindowsNetstatPID(output string, port int) (int, error) {
 	wanted := strconv.Itoa(port)
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
