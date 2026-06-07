@@ -206,14 +206,29 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 		want string
 	}{
 		{in: "minimal", want: "minimal"},
+		{in: "min", want: "minimal"},
+		{in: "none", want: "minimal"},
+		{in: "off", want: "minimal"},
+		{in: "disabled", want: "minimal"},
+		{in: "false", want: "minimal"},
 		{in: "0", want: "minimal"},
 		{in: "low", want: "low"},
+		{in: "light", want: "low"},
 		{in: "1", want: "low"},
 		{in: "medium", want: "medium"},
+		{in: "med", want: "medium"},
+		{in: "normal", want: "medium"},
+		{in: "default", want: "medium"},
 		{in: "2", want: "medium"},
 		{in: "high", want: "high"},
 		{in: "xhigh", want: "high"},
 		{in: "max", want: "high"},
+		{in: "maximum", want: "high"},
+		{in: "deep", want: "high"},
+		{in: "true", want: "high"},
+		{in: "enabled", want: "high"},
+		{in: "3", want: "high"},
+		{in: "4", want: "high"},
 	} {
 		if got := NormalizeReasoningEffort(tc.in); got != tc.want {
 			t.Fatalf("NormalizeReasoningEffort(%q) = %q, want %q", tc.in, got, tc.want)
@@ -223,17 +238,29 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 
 func TestReasoningEffortExtraction(t *testing.T) {
 	for _, tc := range []struct {
+		name string
 		raw  json.RawMessage
 		want string
 	}{
-		{raw: []byte(`"low"`), want: "low"},
-		{raw: []byte(`3`), want: "high"},
-		{raw: []byte(`{"level":"medium"}`), want: "medium"},
-		{raw: []byte(`{"type":"enabled"}`), want: "high"},
-		{raw: []byte(`{"reasoning":{"depth":1}}`), want: "low"},
+		{name: "string low", raw: []byte(`"low"`), want: "low"},
+		{name: "string max", raw: []byte(`"max"`), want: "high"},
+		{name: "string normal", raw: []byte(`"normal"`), want: "medium"},
+		{name: "number 3", raw: []byte(`3`), want: "high"},
+		{name: "number 0", raw: []byte(`0`), want: "minimal"},
+		{name: "object level medium", raw: []byte(`{"level":"medium"}`), want: "medium"},
+		{name: "object type enabled", raw: []byte(`{"type":"enabled"}`), want: "high"},
+		{name: "object reasoning depth", raw: []byte(`{"reasoning":{"depth":1}}`), want: "low"},
+		{name: "object effort", raw: []byte(`{"effort":"max"}`), want: "high"},
+		{name: "object level 2", raw: []byte(`{"level":2}`), want: "medium"},
+		{name: "object depth deep", raw: []byte(`{"depth":"deep"}`), want: "high"},
+		{name: "object reasoning_effort normal", raw: []byte(`{"reasoning_effort":"normal"}`), want: "medium"},
+		{name: "object output_config reasoning effort", raw: []byte(`{"output_config":{"reasoning":{"effort":"low"}}}`), want: "low"},
+		{name: "object thinking type enabled", raw: []byte(`{"thinking":{"type":"enabled"}}`), want: "high"},
 	} {
-		if got := ReasoningEffortFromRaw(tc.raw); got != tc.want {
-			t.Fatalf("ReasoningEffortFromRaw(%s) = %q, want %q", string(tc.raw), got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ReasoningEffortFromRaw(tc.raw); got != tc.want {
+				t.Fatalf("ReasoningEffortFromRaw(%s) = %q, want %q", string(tc.raw), got, tc.want)
+			}
+		})
 	}
 }

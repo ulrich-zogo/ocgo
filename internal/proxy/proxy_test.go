@@ -84,6 +84,107 @@ func TestRawChatStreamRequestsUsage(t *testing.T) {
 	}
 }
 
+func TestPrepareChatBodyStreamOptionsAbsent(t *testing.T) {
+	setTempMappingFile(t)
+	body, err := PrepareChatBody([]byte(`{"model":"kimi-k2.6","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	options, ok := req["stream_options"].(map[string]any)
+	if !ok || options["include_usage"] != true {
+		t.Fatalf("stream_options should be added with include_usage, got %+v in %s", req["stream_options"], string(body))
+	}
+}
+
+func TestPrepareChatBodyStreamOptionsObject(t *testing.T) {
+	setTempMappingFile(t)
+	body, err := PrepareChatBody([]byte(`{"model":"kimi-k2.6","stream":true,"stream_options":{"foo":"bar"},"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	options, _ := req["stream_options"].(map[string]any)
+	if options == nil {
+		t.Fatalf("stream_options missing in %s", string(body))
+	}
+	if options["include_usage"] != true {
+		t.Fatalf("include_usage should be true, got %+v", options)
+	}
+	if options["foo"] != "bar" {
+		t.Fatalf("foo should be preserved, got %+v", options)
+	}
+}
+
+func TestPrepareChatBodyStreamOptionsNull(t *testing.T) {
+	setTempMappingFile(t)
+	body, err := PrepareChatBody([]byte(`{"model":"kimi-k2.6","stream":true,"stream_options":null,"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	options, _ := req["stream_options"].(map[string]any)
+	if options == nil || options["include_usage"] != true {
+		t.Fatalf("stream_options should be a map with include_usage, got %+v in %s", req["stream_options"], string(body))
+	}
+}
+
+func TestPrepareChatBodyStreamOptionsBool(t *testing.T) {
+	setTempMappingFile(t)
+	body, err := PrepareChatBody([]byte(`{"model":"kimi-k2.6","stream":true,"stream_options":true,"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	options, _ := req["stream_options"].(map[string]any)
+	if options == nil || options["include_usage"] != true {
+		t.Fatalf("stream_options should be a map with include_usage, got %+v in %s", req["stream_options"], string(body))
+	}
+}
+
+func TestPrepareChatBodyStreamOptionsString(t *testing.T) {
+	setTempMappingFile(t)
+	body, err := PrepareChatBody([]byte(`{"model":"kimi-k2.6","stream":true,"stream_options":"oops","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	options, _ := req["stream_options"].(map[string]any)
+	if options == nil || options["include_usage"] != true {
+		t.Fatalf("stream_options should be a map with include_usage, got %+v in %s", req["stream_options"], string(body))
+	}
+}
+
+func TestPrepareChatBodyStreamFalseDoesNotAddStreamOptions(t *testing.T) {
+	setTempMappingFile(t)
+	body, err := PrepareChatBody([]byte(`{"model":"kimi-k2.6","stream":false,"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := req["stream_options"]; ok {
+		t.Fatalf("stream_options should not be added when stream=false, got %+v in %s", req["stream_options"], string(body))
+	}
+}
+
 func TestRawChatReasoningEffortPassThrough(t *testing.T) {
 	setTempMappingFile(t)
 	body, err := PrepareChatBody([]byte(`{"model":"glm-5.1","reasoning":{"effort":"xhigh"},"thinking":{"type":"enabled"},"output_config":{"reasoning":{"depth":2}},"messages":[{"role":"user","content":"hello"}]}`))

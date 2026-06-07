@@ -377,19 +377,12 @@ func PrepareChatBody(body []byte) ([]byte, error) {
 	}
 
 	if req["stream"] == true {
-		if raw, ok := req["stream_options"]; ok {
-			var opts compat.OAIStreamOptions
-			b, _ := json.Marshal(raw)
-			json.Unmarshal(b, &opts)
-			req["stream_options"] = map[string]any{"include_usage": true}
-			for k, v := range raw.(map[string]any) {
-				if k != "include_usage" {
-					req["stream_options"].(map[string]any)[k] = v
-				}
-			}
-		} else {
-			req["stream_options"] = map[string]any{"include_usage": true}
+		options, _ := req["stream_options"].(map[string]any)
+		if options == nil {
+			options = map[string]any{}
 		}
+		options["include_usage"] = true
+		req["stream_options"] = options
 		body, _ = json.Marshal(req)
 	}
 

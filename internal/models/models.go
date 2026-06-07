@@ -266,16 +266,24 @@ func Metadata(model string) ModelMetadata {
 
 	switch id {
 	case "minimax-m3":
-		meta.UsesAnthropicEndpoint = true
-		meta.ParallelToolCalls = true
-		meta.SupportsImageOriginal = true
-		meta.SupportsSearchTool = true
+		if meta.DisplayName == id {
+			meta.DisplayName = "MiniMax M3"
+			meta.Description = "MiniMax M3 via OpenCode Go"
+		}
 		if meta.ContextWindow == 128000 {
 			meta.ContextWindow = 512000
 		}
 		if meta.MaxContextWindow == 128000 {
 			meta.MaxContextWindow = 512000
 		}
+		if len(meta.InputModalities) == 1 && meta.InputModalities[0] == "text" {
+			meta.InputModalities = []string{"text", "image", "video"}
+			meta.CodexInputModalities = []string{"text", "image"}
+		}
+		meta.UsesAnthropicEndpoint = true
+		meta.ParallelToolCalls = true
+		meta.SupportsImageOriginal = true
+		meta.SupportsSearchTool = true
 	case "minimax-m2.7":
 		meta.UsesAnthropicEndpoint = true
 		meta.ParallelToolCalls = true
@@ -291,15 +299,11 @@ func Metadata(model string) ModelMetadata {
 		meta.ParallelToolCalls = true
 		meta.SupportsImageOriginal = true
 		meta.SupportsSearchTool = true
-	case "kimi-k2.6":
-		meta.ParallelToolCalls = true
-		meta.SupportsImageOriginal = true
-		meta.SupportsSearchTool = true
-	case "kimi-k2.5":
-		meta.ParallelToolCalls = true
-		meta.SupportsImageOriginal = true
-		meta.SupportsSearchTool = true
-	case "mimo-v2-omni":
+	case "kimi-k2.6", "kimi-k2.5", "mimo-v2-omni":
+		if len(meta.InputModalities) == 1 && meta.InputModalities[0] == "text" {
+			meta.InputModalities = []string{"text", "image"}
+			meta.CodexInputModalities = []string{"text", "image"}
+		}
 		meta.ParallelToolCalls = true
 		meta.SupportsImageOriginal = true
 		meta.SupportsSearchTool = true
