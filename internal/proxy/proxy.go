@@ -38,6 +38,12 @@ func RunServer(cfg config.Config) error {
 	}
 	defer os.Remove(pidPath)
 
+	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	fmt.Printf("ocgo proxy listening on http://%s\n", addr)
+	return http.ListenAndServe(addr, NewMux(cfg))
+}
+
+func NewMux(cfg config.Config) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
@@ -52,10 +58,8 @@ func RunServer(cfg config.Config) error {
 	mux.HandleFunc("/v1/responses", func(w http.ResponseWriter, r *http.Request) {
 		ProxyResponses(w, r, cfg)
 	})
-
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	fmt.Printf("ocgo proxy listening on http://%s\n", addr)
-	return http.ListenAndServe(addr, mux)
+	mux.HandleFunc("/v1/models", ProxyModels)
+	return mux
 }
 
 func CountTokens(w http.ResponseWriter, r *http.Request) {

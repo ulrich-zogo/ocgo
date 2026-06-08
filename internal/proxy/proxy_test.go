@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"ocgo/internal/compat"
 	"ocgo/internal/config"
 	"ocgo/internal/mapping"
+	"ocgo/internal/models"
 )
 
 func setTempMappingFile(t *testing.T) string {
@@ -684,3 +686,256 @@ func TestStreamResponsesForwardsToolCalls(t *testing.T) {
 		t.Fatalf("missing tool call reference in stream:\n%s", out)
 	}
 }
+
+func decodeModelsList(t *testing.T, body []byte) struct {
+	Object string                 `json:"object"`
+	Data   []models.OfficialModel `json:"data"`
+} {
+	t.Helper()
+	var resp struct {
+		Object string                 `json:"object"`
+		Data   []models.OfficialModel `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode models response: %v (body=%s)", err, string(body))
+	}
+	return resp
+}
+
+func TestProxyModelsReturnsOfficialOrder(t *testing.T) {
+	models.ResetFetchersForTest()
+	official := []models.OfficialModel{
+		{ID: "minimax-m3", Object: "model", Created: 1780792361, OwnedBy: "opencode"},
+		{ID: "kimi-k2.6", Object: "model", Created: 1780792361, OwnedBy: "opencode"},
+		{ID: "glm-5.1", Object: "model", Created: 1780792361, OwnedBy: "opencode"},
+	}
+	models.SetFetchersForTest(nil, official, nil, nil)
+	t.Cleanup(func() { models.ResetFetchersForTest() })
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	w := httptest.NewRecorder()
+	ProxyModels(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+	resp := decodeModelsList(t, w.Body.Bytes())
+	if resp.Object != "list" {
+		t.Fatalf("object = %q, want list", resp.Object)
+	}
+	if len(resp.Data) != 3 {
+		t.Fatalf("data length = %d, want 3", len(resp.Data))
+	}
+	wantIDs := []string{"minimax-m3", "kimi-k2.6", "glm-5.1"}
+	for i, want := range wantIDs {
+		m := resp.Data[i]
+		if m.ID != want {
+			t.Fatalf("data[%d].id = %q, want %q (official order)", i, m.ID, want)
+		}
+		if m.Object != "model" {
+			t.Fatalf("data[%d].object = %q, want model", i, m.Object)
+		}
+		if m.Created != 1780792361 {
+			t.Fatalf("data[%d].created = %d, want 1780792361", i, m.Created)
+		}
+		if m.OwnedBy != "opencode" {
+			t.Fatalf("data[%d].owned_by = %q, want opencode", i, m.OwnedBy)
+		}
+	}
+}
+
+func TestProxyModelsPreservesExactOrder(t *testing.T) {
+	models.ResetFetchersForTest()
+	official := []models.OfficialModel{
+		{ID: "minimax-m3", Object: "model", Created: 100, OwnedBy: "opencode"},
+		{ID: "kimi-k2.6", Object: "model", Created: 200, OwnedBy: "opencode"},
+		{ID: "glm-5.1", Object: "model", Created: 300, OwnedBy: "opencode"},
+	}
+	models.SetFetchersForTest(nil, official, nil, nil)
+	t.Cleanup(func() { models.ResetFetchersForTest() })
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	w := httptest.NewRecorder()
+	ProxyModels(w, req)
+
+	resp := decodeModelsList(t, w.Body.Bytes())
+	gotIDs := make([]string, 0, len(resp.Data))
+	for _, m := range resp.Data {
+		gotIDs = append(gotIDs, m.ID)
+	}
+	want := []string{"minimax-m3", "kimi-k2.6", "glm-5.1"}
+	if len(gotIDs) != len(want) {
+		t.Fatalf("ids length = %d, want %d", len(gotIDs), len(want))
+	}
+	for i, id := range want {
+		if gotIDs[i] != id {
+			t.Fatalf("order mismatch at %d: got %q, want %q (full=%v)", i, gotIDs[i], id, gotIDs)
+		}
+	}
+}
+
+func TestProxyModelsRejectsNonGet(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			req := httptest.NewRequest(method, "/v1/models", nil)
+			w := httptest.NewRecorder()
+			ProxyModels(w, req)
+			if w.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("%s status = %d, want 405", method, w.Code)
+			}
+		})
+	}
+}
+
+func TestProxyModelsFallbackList(t *testing.T) {
+	models.ResetFetchersForTest()
+	models.SetFetchersForTest(nil, nil, errors.New("no official"), errors.New("no remote"))
+	t.Cleanup(func() { models.ResetFetchersForTest() })
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	w := httptest.NewRecorder()
+	ProxyModels(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	resp := decodeModelsList(t, w.Body.Bytes())
+	if resp.Object != "list" {
+		t.Fatalf("object = %q, want list", resp.Object)
+	}
+	wantFallback := []string{
+		"minimax-m3",
+		"minimax-m2.7",
+		"minimax-m2.5",
+		"kimi-k2.6",
+		"kimi-k2.5",
+		"glm-5.1",
+		"glm-5",
+		"deepseek-v4-pro",
+		"deepseek-v4-flash",
+		"qwen3.7-max",
+		"qwen3.7-plus",
+		"qwen3.6-plus",
+		"qwen3.5-plus",
+		"mimo-v2-pro",
+		"mimo-v2-omni",
+		"mimo-v2.5-pro",
+		"mimo-v2.5",
+		"hy3-preview",
+	}
+	if len(resp.Data) != len(wantFallback) {
+		t.Fatalf("data length = %d, want %d (full=%v)", len(resp.Data), len(wantFallback), modelIDs(resp.Data))
+	}
+	for i, want := range wantFallback {
+		m := resp.Data[i]
+		if m.ID != want {
+			t.Fatalf("data[%d].id = %q, want %q (fallback order)", i, m.ID, want)
+		}
+		if m.Object != "model" {
+			t.Fatalf("data[%d].object = %q, want model", i, m.Object)
+		}
+		if m.Created != 0 {
+			t.Fatalf("data[%d].created = %d, want 0", i, m.Created)
+		}
+		if m.OwnedBy != "opencode" {
+			t.Fatalf("data[%d].owned_by = %q, want opencode", i, m.OwnedBy)
+		}
+	}
+	if resp.Data[0].ID != "minimax-m3" {
+		t.Fatalf("data[0].id = %q, want minimax-m3", resp.Data[0].ID)
+	}
+	if resp.Data[9].ID != "qwen3.7-max" {
+		t.Fatalf("data[9].id = %q, want qwen3.7-max", resp.Data[9].ID)
+	}
+}
+
+func modelIDs(in []models.OfficialModel) []string {
+	out := make([]string, 0, len(in))
+	for _, m := range in {
+		out = append(out, m.ID)
+	}
+	return out
+}
+
+func TestProxyModelsFallbacksObjectAndOwnedBy(t *testing.T) {
+	models.ResetFetchersForTest()
+	models.SetFetchersForTest(nil, []models.OfficialModel{
+		{ID: "minimax-m3"},
+		{ID: "qwen3.7-plus", Object: "model"},
+		{ID: "hy3-preview", OwnedBy: "opencode"},
+	}, nil, nil)
+	t.Cleanup(func() { models.ResetFetchersForTest() })
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	w := httptest.NewRecorder()
+	ProxyModels(w, req)
+
+	resp := decodeModelsList(t, w.Body.Bytes())
+	if len(resp.Data) != 3 {
+		t.Fatalf("data length = %d, want 3", len(resp.Data))
+	}
+	for i, m := range resp.Data {
+		if m.Object != "model" {
+			t.Fatalf("data[%d].object = %q, want model (defaulted)", i, m.Object)
+		}
+		if m.OwnedBy != "opencode" {
+			t.Fatalf("data[%d].owned_by = %q, want opencode (defaulted)", i, m.OwnedBy)
+		}
+	}
+}
+
+func TestNewMuxRegistersV1ModelsRoute(t *testing.T) {
+	models.ResetFetchersForTest()
+	official := []models.OfficialModel{
+		{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
+	}
+	models.SetFetchersForTest(nil, official, nil, nil)
+	t.Cleanup(func() { models.ResetFetchersForTest() })
+
+	mux := NewMux(config.Config{})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("/v1/models status = %d, want 200", w.Code)
+	}
+	resp := decodeModelsList(t, w.Body.Bytes())
+	if resp.Object != "list" {
+		t.Fatalf("object = %q, want list", resp.Object)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].ID != "minimax-m3" {
+		t.Fatalf("data = %+v, want one entry minimax-m3", resp.Data)
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/v1/models", nil)
+	postW := httptest.NewRecorder()
+	mux.ServeHTTP(postW, postReq)
+	if postW.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /v1/models status = %d, want 405", postW.Code)
+	}
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	healthW := httptest.NewRecorder()
+	mux.ServeHTTP(healthW, healthReq)
+	if healthW.Code != http.StatusOK {
+		t.Fatalf("/health status = %d, want 200", healthW.Code)
+	}
+	if healthW.Body.String() != "ok\n" {
+		t.Fatalf("/health body = %q, want ok\\n", healthW.Body.String())
+	}
+
+	countReq := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
+	countW := httptest.NewRecorder()
+	mux.ServeHTTP(countW, countReq)
+	if countW.Code != http.StatusOK {
+		t.Fatalf("/v1/messages/count_tokens status = %d, want 200", countW.Code)
+	}
+	if !strings.Contains(countW.Body.String(), `"input_tokens"`) {
+		t.Fatalf("/v1/messages/count_tokens body missing input_tokens: %s", countW.Body.String())
+	}
+}
+
