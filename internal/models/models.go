@@ -3,7 +3,6 @@ package models
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -313,32 +312,6 @@ func RefreshAll() {
 		officialModels.refresh()
 	}()
 	wg.Wait()
-}
-
-func SetFetchersForTest(remote map[string]remoteModelInfo, official []OfficialModel, officialErr error, remoteErr error) {
-	remoteModels = newLazyFetcher(func() (map[string]remoteModelInfo, error) {
-		if remoteErr != nil {
-			return nil, remoteErr
-		}
-		if remote == nil {
-			return nil, errors.New("remote unavailable")
-		}
-		return remote, nil
-	})
-	officialModels = newLazyFetcher(func() ([]OfficialModel, error) {
-		if officialErr != nil {
-			return nil, officialErr
-		}
-		if official == nil {
-			return nil, errors.New("official unavailable")
-		}
-		return official, nil
-	})
-}
-
-func ResetFetchersForTest() {
-	remoteModels = newLazyFetcher(fetchRemoteModels)
-	officialModels = newLazyFetcher(fetchOfficialModels)
 }
 
 type ModelMetadata struct {

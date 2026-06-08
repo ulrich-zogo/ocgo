@@ -196,19 +196,66 @@ func TestWriteCodexModelCatalogIncludesMappingsAfterKnown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	var catalog struct {
+		Models []struct {
+			Slug string `json:"slug"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(b, &catalog); err != nil {
+		t.Fatal(err)
+	}
+
+	knownIDs := models.KnownIDs()
+	knownCount := len(knownIDs)
+	if knownCount != 18 {
+		t.Fatalf("expected 18 known models from fallback, got %d", knownCount)
+	}
+
+	if len(catalog.Models) < knownCount+2 {
+		t.Fatalf("catalog should have at least %d models (18 known + 2 mappings), got %d", knownCount+2, len(catalog.Models))
+	}
+
+	for i, m := range catalog.Models {
+		if m.Slug == "gpt-4" || m.Slug == "gpt-5" {
+			if i < knownCount {
+				slugs := []string{}
+				for _, x := range catalog.Models {
+					slugs = append(slugs, x.Slug)
+				}
+				t.Fatalf("mapping %s should appear after known models (at index >= %d), found at index %d\norder: %v", m.Slug, knownCount, i, slugs)
+			}
+		}
+	}
+
+	for i := 0; i < knownCount; i++ {
+		if catalog.Models[i].Slug != knownIDs[i] {
+			t.Fatalf("known model at index %d = %q, want %q (fallback order must be preserved)", i, catalog.Models[i].Slug, knownIDs[i])
+		}
+	}
+
+	if catalog.Models[knownCount].Slug != "gpt-4" || catalog.Models[knownCount+1].Slug != "gpt-5" {
+		slugs := []string{}
+		for _, x := range catalog.Models[knownCount:] {
+			slugs = append(slugs, x.Slug)
+		}
+		t.Fatalf("expected [gpt-4, gpt-5] after known models (alphabetical), got %v", slugs)
+	}
+
+	for _, want := range []string{"qwen3.7-plus", "hy3-preview"} {
+		found := false
+		for i := 0; i < knownCount; i++ {
+			if catalog.Models[i].Slug == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected %q in the first %d fallback positions", want, knownCount)
+		}
+	}
+
 	content := string(b)
-	if !strings.Contains(content, `"slug": "qwen3.7-plus"`) {
-		t.Fatalf("catalog should contain qwen3.7-plus from fallback:\n%s", content)
-	}
-	if !strings.Contains(content, `"slug": "hy3-preview"`) {
-		t.Fatalf("catalog should contain hy3-preview from fallback:\n%s", content)
-	}
-	if !strings.Contains(content, `"slug": "gpt-5"`) {
-		t.Fatalf("catalog should contain gpt-5 mapping:\n%s", content)
-	}
-	if !strings.Contains(content, `"slug": "gpt-4"`) {
-		t.Fatalf("catalog should contain gpt-4 mapping:\n%s", content)
-	}
 	if !strings.Contains(content, "OCGO mapping to deepseek-v4-pro") {
 		t.Fatalf("catalog should contain mapping description:\n%s", content)
 	}
