@@ -86,6 +86,9 @@ func TestWriteCodexModelCatalog(t *testing.T) {
 	config.ModelMappingFile = func() string { return filepath.Join(t.TempDir(), "model-mapping.json") }
 	t.Cleanup(func() { config.ModelMappingFile = old })
 
+	restoreCache := models.SetCacheFileForTest(filepath.Join(t.TempDir(), "model-catalog-cache.json"))
+	t.Cleanup(restoreCache)
+
 	path := filepath.Join(t.TempDir(), "ocgo-models.json")
 	if err := WriteModelCatalog(path); err != nil {
 		t.Fatal(err)
@@ -132,13 +135,17 @@ func TestWriteCodexModelCatalogRespectsOfficialOrder(t *testing.T) {
 	t.Cleanup(func() { config.ModelMappingFile = old })
 
 	models.ResetFetchersForTest()
+	restoreCache := models.SetCacheFileForTest(filepath.Join(t.TempDir(), "model-catalog-cache.json"))
 	official := []models.OfficialModel{
 		{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
 		{ID: "kimi-k2.6", Object: "model", Created: 2, OwnedBy: "opencode"},
 		{ID: "glm-5.1", Object: "model", Created: 3, OwnedBy: "opencode"},
 	}
 	models.SetFetchersForTest(nil, official, nil, nil)
-	t.Cleanup(func() { models.ResetFetchersForTest() })
+	t.Cleanup(func() {
+		models.ResetFetchersForTest()
+		restoreCache()
+	})
 
 	path := filepath.Join(t.TempDir(), "ocgo-models.json")
 	if err := WriteModelCatalog(path); err != nil {
@@ -177,8 +184,12 @@ func TestWriteCodexModelCatalogIncludesMappingsAfterKnown(t *testing.T) {
 	t.Cleanup(func() { config.ModelMappingFile = old })
 
 	models.ResetFetchersForTest()
+	restoreCache := models.SetCacheFileForTest(filepath.Join(t.TempDir(), "model-catalog-cache.json"))
 	models.SetFetchersForTest(nil, nil, errors.New("no official"), errors.New("no remote"))
-	t.Cleanup(func() { models.ResetFetchersForTest() })
+	t.Cleanup(func() {
+		models.ResetFetchersForTest()
+		restoreCache()
+	})
 
 	mappingsContent := `{
 		"claude": {},

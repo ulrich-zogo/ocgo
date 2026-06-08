@@ -26,6 +26,12 @@ func setTempMappingFile(t *testing.T) string {
 	return path
 }
 
+func isolateCacheForTest(t *testing.T) {
+	t.Helper()
+	restore := models.SetCacheFileForTest(filepath.Join(t.TempDir(), "model-catalog-cache.json"))
+	t.Cleanup(restore)
+}
+
 func TestPrepareChatBodyAppliesCodexMapping(t *testing.T) {
 	setTempMappingFile(t)
 	m := mapping.DefaultModelMappings()
@@ -703,6 +709,7 @@ func decodeModelsList(t *testing.T, body []byte) struct {
 }
 
 func TestProxyModelsReturnsOfficialOrder(t *testing.T) {
+	isolateCacheForTest(t)
 	models.ResetFetchersForTest()
 	official := []models.OfficialModel{
 		{ID: "minimax-m3", Object: "model", Created: 1780792361, OwnedBy: "opencode"},
@@ -748,6 +755,7 @@ func TestProxyModelsReturnsOfficialOrder(t *testing.T) {
 }
 
 func TestProxyModelsPreservesExactOrder(t *testing.T) {
+	isolateCacheForTest(t)
 	models.ResetFetchersForTest()
 	official := []models.OfficialModel{
 		{ID: "minimax-m3", Object: "model", Created: 100, OwnedBy: "opencode"},
@@ -791,6 +799,7 @@ func TestProxyModelsRejectsNonGet(t *testing.T) {
 }
 
 func TestProxyModelsFallbackList(t *testing.T) {
+	isolateCacheForTest(t)
 	models.ResetFetchersForTest()
 	models.SetFetchersForTest(nil, nil, errors.New("no official"), errors.New("no remote"))
 	t.Cleanup(func() { models.ResetFetchersForTest() })
@@ -861,6 +870,7 @@ func modelIDs(in []models.OfficialModel) []string {
 }
 
 func TestProxyModelsFallbacksObjectAndOwnedBy(t *testing.T) {
+	isolateCacheForTest(t)
 	models.ResetFetchersForTest()
 	models.SetFetchersForTest(nil, []models.OfficialModel{
 		{ID: "minimax-m3"},
@@ -888,6 +898,7 @@ func TestProxyModelsFallbacksObjectAndOwnedBy(t *testing.T) {
 }
 
 func TestNewMuxRegistersV1ModelsRoute(t *testing.T) {
+	isolateCacheForTest(t)
 	models.ResetFetchersForTest()
 	official := []models.OfficialModel{
 		{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},

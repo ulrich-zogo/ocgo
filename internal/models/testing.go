@@ -1,6 +1,10 @@
 package models
 
-import "errors"
+import (
+	"errors"
+
+	"ocgo/internal/config"
+)
 
 // This file contains test-only hooks that allow other internal packages
 // to inject mock fetchers for the model catalog. They must NEVER be called
@@ -35,4 +39,18 @@ func SetFetchersForTest(remote map[string]remoteModelInfo, official []OfficialMo
 func ResetFetchersForTest() {
 	remoteModels = newLazyFetcher(fetchRemoteModels)
 	officialModels = newLazyFetcher(fetchOfficialModels)
+}
+
+func SetCacheFileForTest(path string) func() {
+	old := CatalogCacheFile
+	CatalogCacheFile = func() string { return path }
+	return func() { CatalogCacheFile = old }
+}
+
+// ResetAllForTest resets fetchers AND the cache file path back to the
+// production defaults. This is useful in tests that do not want to
+// isolate the cache but still need a clean fetcher state.
+func ResetAllForTest() {
+	ResetFetchersForTest()
+	CatalogCacheFile = config.ModelCatalogCacheFile
 }

@@ -2,6 +2,7 @@ package models
 
 import (
 	"errors"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -26,9 +27,11 @@ func withModelFetchers(t *testing.T, remote map[string]remoteModelInfo, official
 		}
 		return official, nil
 	})
+	restoreCache := SetCacheFileForTest(filepath.Join(t.TempDir(), "model-catalog-cache.json"))
 	t.Cleanup(func() {
 		remoteModels = oldRemoteModels
 		officialModels = oldOfficialModels
+		restoreCache()
 	})
 }
 
