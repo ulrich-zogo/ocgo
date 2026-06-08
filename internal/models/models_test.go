@@ -2,11 +2,12 @@ package models
 
 import (
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 )
 
-func withModelFetchers(t *testing.T, remote map[string]remoteModelInfo, official []string, officialErr error) {
+func withModelFetchers(t *testing.T, remote map[string]remoteModelInfo, official []OfficialModel, officialErr error) {
 	t.Helper()
 	oldRemoteModels := remoteModels
 	oldOfficialModels := officialModels
@@ -16,7 +17,7 @@ func withModelFetchers(t *testing.T, remote map[string]remoteModelInfo, official
 		}
 		return remote, nil
 	})
-	officialModels = newLazyFetcher(func() ([]string, error) {
+	officialModels = newLazyFetcher(func() ([]OfficialModel, error) {
 		if officialErr != nil {
 			return nil, officialErr
 		}
@@ -31,20 +32,33 @@ func withModelFetchers(t *testing.T, remote map[string]remoteModelInfo, official
 	})
 }
 
-func TestKnownIDsReturnsOfficialSorted(t *testing.T) {
+func officialFromIDs(ids ...string) []OfficialModel {
+	out := make([]OfficialModel, len(ids))
+	for i, id := range ids {
+		out[i] = OfficialModel{
+			ID:      id,
+			Object:  "model",
+			Created: int64(1780792361 + i),
+			OwnedBy: "opencode",
+		}
+	}
+	return out
+}
+
+func TestKnownIDsPreservesOfficialOrder(t *testing.T) {
 	withModelFetchers(t,
 		map[string]remoteModelInfo{"remote-b": {}, "remote-a": {}},
-		[]string{"official-b", "official-a"},
+		officialFromIDs("minimax-m3", "kimi-k2.6", "glm-5.1"),
 		nil,
 	)
 	got := KnownIDs()
-	want := []string{"official-a", "official-b"}
+	want := []string{"minimax-m3", "kimi-k2.6", "glm-5.1"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("KnownIDs = %v, want %v", got, want)
+		t.Fatalf("KnownIDs = %v, want %v (official order must be preserved)", got, want)
 	}
 }
 
-func TestKnownIDsReturnsRemoteWhenOfficialFails(t *testing.T) {
+func TestKnownIDsReturnsRemoteSortedWhenOfficialFails(t *testing.T) {
 	withModelFetchers(t,
 		map[string]remoteModelInfo{"remote-b": {}, "remote-a": {}},
 		nil,
@@ -53,7 +67,7 @@ func TestKnownIDsReturnsRemoteWhenOfficialFails(t *testing.T) {
 	got := KnownIDs()
 	want := []string{"remote-a", "remote-b"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("KnownIDs = %v, want %v", got, want)
+		t.Fatalf("KnownIDs = %v, want %v (remote must be sorted)", got, want)
 	}
 }
 
@@ -66,10 +80,30 @@ func TestKnownIDsReturnsFallbackWhenBothFail(t *testing.T) {
 	}
 }
 
+func TestKnownIDsFallbackContains18Models(t *testing.T) {
+	withModelFetchers(t, nil, nil, errors.New("no data"))
+	ids := KnownIDs()
+	if len(ids) != 18 {
+		t.Fatalf("fallback should contain 18 models, got %d: %v", len(ids), ids)
+	}
+	for _, want := range []string{"minimax-m3", "qwen3.7-plus", "hy3-preview"} {
+		found := false
+		for _, id := range ids {
+			if id == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected %q in fallback, got %v", want, ids)
+		}
+	}
+}
+
 func TestKnownIDsReturnsRemoteWhenOfficialEmpty(t *testing.T) {
 	withModelFetchers(t,
 		map[string]remoteModelInfo{"remote-a": {}},
-		[]string{},
+		[]OfficialModel{},
 		nil,
 	)
 	got := KnownIDs()
@@ -79,16 +113,234 @@ func TestKnownIDsReturnsRemoteWhenOfficialEmpty(t *testing.T) {
 	}
 }
 
-func TestKnownIDsReturnsEmptyOfficialThenRemote(t *testing.T) {
+func TestKnownIDsOfficialTakesPriorityOverRemote(t *testing.T) {
 	withModelFetchers(t,
 		map[string]remoteModelInfo{"remote-a": {}, "remote-b": {}},
-		[]string{"official-a"},
+		officialFromIDs("official-a"),
 		nil,
 	)
 	got := KnownIDs()
 	want := []string{"official-a"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("KnownIDs = %v, want %v (official should take priority over remote)", got, want)
+	}
+}
+
+func TestKnownModelsPreservesOfficialOrder(t *testing.T) {
+	withModelFetchers(t,
+		nil,
+		[]OfficialModel{
+			{ID: "minimax-m3", Object: "model", Created: 1780792361, OwnedBy: "opencode"},
+			{ID: "kimi-k2.6", Object: "model", Created: 1780792362, OwnedBy: "opencode"},
+			{ID: "glm-5.1", Object: "model", Created: 1780792363, OwnedBy: "opencode"},
+		},
+		nil,
+	)
+	known := KnownModels()
+	if len(known) != 3 {
+		t.Fatalf("len(KnownModels) = %d, want 3", len(known))
+	}
+	if known[0].ID != "minimax-m3" || known[0].Created != 1780792361 || known[0].OwnedBy != "opencode" {
+		t.Fatalf("known[0] = %+v, want ID=minimax-m3 Created=1780792361 OwnedBy=opencode", known[0])
+	}
+	if known[1].ID != "kimi-k2.6" {
+		t.Fatalf("known[1].ID = %q, want kimi-k2.6", known[1].ID)
+	}
+	if known[2].ID != "glm-5.1" {
+		t.Fatalf("known[2].ID = %q, want glm-5.1", known[2].ID)
+	}
+}
+
+func TestKnownModelsFallbackIsStructured(t *testing.T) {
+	withModelFetchers(t, nil, nil, errors.New("no data"))
+	known := KnownModels()
+	if len(known) != 18 {
+		t.Fatalf("len(KnownModels) = %d, want 18", len(known))
+	}
+	if known[0].ID != "minimax-m3" {
+		t.Fatalf("known[0].ID = %q, want minimax-m3", known[0].ID)
+	}
+	if known[0].Object != "model" {
+		t.Fatalf("known[0].Object = %q, want model", known[0].Object)
+	}
+	if known[0].OwnedBy != "opencode" {
+		t.Fatalf("known[0].OwnedBy = %q, want opencode", known[0].OwnedBy)
+	}
+	if known[0].Created != 0 {
+		t.Fatalf("known[0].Created = %d, want 0", known[0].Created)
+	}
+}
+
+func TestKnownModelsRemoteSorted(t *testing.T) {
+	withModelFetchers(t,
+		map[string]remoteModelInfo{"remote-b": {}, "remote-a": {}},
+		nil,
+		errors.New("official down"),
+	)
+	known := KnownModels()
+	if len(known) != 2 {
+		t.Fatalf("len = %d, want 2", len(known))
+	}
+	if known[0].ID != "remote-a" || known[1].ID != "remote-b" {
+		t.Fatalf("known = %v, want sorted", known)
+	}
+	for _, m := range known {
+		if m.Object != "model" || m.OwnedBy != "opencode" || m.Created != 0 {
+			t.Fatalf("remote known model should have defaults: %+v", m)
+		}
+	}
+}
+
+func TestOfficialModelsReturnsCopy(t *testing.T) {
+	official := []OfficialModel{
+		{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
+	}
+	withModelFetchers(t, nil, official, nil)
+	got, err := OfficialModels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "minimax-m3" {
+		t.Fatalf("OfficialModels = %+v, want one model", got)
+	}
+	got[0].ID = "modified"
+	got2, _ := OfficialModels()
+	if got2[0].ID != "minimax-m3" {
+		t.Fatal("OfficialModels should return a defensive copy")
+	}
+}
+
+func TestOfficialModelIDs(t *testing.T) {
+	official := officialFromIDs("a", "b", "c")
+	withModelFetchers(t, nil, official, nil)
+	ids, err := OfficialModelIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"a", "b", "c"}
+	if strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Fatalf("OfficialModelIDs = %v, want %v", ids, want)
+	}
+}
+
+func TestFetchOfficialModelsParsesAllFields(t *testing.T) {
+	body := `{
+		"object": "list",
+		"data": [
+			{"id": "minimax-m3", "object": "model", "created": 1780792361, "owned_by": "opencode"},
+			{"id": "kimi-k2.6", "object": "model", "created": 1780792361, "owned_by": "opencode"}
+		]
+	}`
+	got, err := parseOfficialModelsBody([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].ID != "minimax-m3" || got[0].Object != "model" || got[0].Created != 1780792361 || got[0].OwnedBy != "opencode" {
+		t.Fatalf("got[0] = %+v", got[0])
+	}
+	if got[1].ID != "kimi-k2.6" {
+		t.Fatalf("got[1].ID = %q", got[1].ID)
+	}
+}
+
+func TestFetchOfficialModelsPreservesOrder(t *testing.T) {
+	body := `{
+		"object": "list",
+		"data": [
+			{"id":"minimax-m3","object":"model","created":1,"owned_by":"opencode"},
+			{"id":"kimi-k2.6","object":"model","created":1,"owned_by":"opencode"},
+			{"id":"glm-5.1","object":"model","created":1,"owned_by":"opencode"}
+		]
+	}`
+	got, err := parseOfficialModelsBody([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"minimax-m3", "kimi-k2.6", "glm-5.1"}
+	for i, m := range got {
+		if m.ID != want[i] {
+			t.Fatalf("got[%d].ID = %q, want %q", i, m.ID, want[i])
+		}
+	}
+}
+
+func TestFetchOfficialModelsDeduplicatesPreservingFirst(t *testing.T) {
+	body := `{
+		"object": "list",
+		"data": [
+			{"id":"minimax-m3","object":"model","created":1,"owned_by":"opencode"},
+			{"id":"kimi-k2.6","object":"model","created":1,"owned_by":"opencode"},
+			{"id":"minimax-m3","object":"model","created":2,"owned_by":"duplicate"}
+		]
+	}`
+	got, err := parseOfficialModelsBody([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 (duplicates removed): %+v", len(got), got)
+	}
+	if got[0].ID != "minimax-m3" || got[0].Created != 1 {
+		t.Fatalf("first occurrence should be preserved, got %+v", got[0])
+	}
+	if got[1].ID != "kimi-k2.6" {
+		t.Fatalf("got[1].ID = %q, want kimi-k2.6", got[1].ID)
+	}
+}
+
+func TestFetchOfficialModelsNormalizesOpencodeGoPrefix(t *testing.T) {
+	body := `{"object":"list","data":[{"id":"opencode-go/minimax-m3","object":"model","created":1,"owned_by":"opencode"}]}`
+	got, err := parseOfficialModelsBody([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].ID != "minimax-m3" {
+		t.Fatalf("ID = %q, want minimax-m3", got[0].ID)
+	}
+}
+
+func TestFetchOfficialModelsSkipsEmptyIDs(t *testing.T) {
+	body := `{"object":"list","data":[{"id":"   ","object":"model","created":1,"owned_by":"opencode"},{"id":"kimi-k2.6","object":"model","created":1,"owned_by":"opencode"}]}`
+	got, err := parseOfficialModelsBody([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "kimi-k2.6" {
+		t.Fatalf("got = %+v, want only kimi-k2.6", got)
+	}
+}
+
+func TestFetchOfficialModelsDefaultsObjectAndOwnedBy(t *testing.T) {
+	body := `{"object":"list","data":[{"id":"minimax-m3","created":1}]}`
+	got, err := parseOfficialModelsBody([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].Object != "model" {
+		t.Fatalf("Object = %q, want model", got[0].Object)
+	}
+	if got[0].OwnedBy != "opencode" {
+		t.Fatalf("OwnedBy = %q, want opencode", got[0].OwnedBy)
+	}
+}
+
+func TestFetchOfficialModelsEmptyData(t *testing.T) {
+	body := `{"object":"list","data":[]}`
+	got, err := parseOfficialModelsBody([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("len = %d, want 0", len(got))
 	}
 }
 
@@ -138,6 +390,19 @@ func TestModelMetadataQwenUsesAnthropic(t *testing.T) {
 	}
 	if !Metadata("qwen3.7-max").SupportsSearchTool {
 		t.Fatal("qwen3.7-max should support search tool")
+	}
+}
+
+func TestModelMetadataNewFallbackModels(t *testing.T) {
+	withModelFetchers(t, nil, nil, errors.New("no remote"))
+	for _, id := range []string{"qwen3.7-plus", "hy3-preview"} {
+		meta := Metadata(id)
+		if len(meta.InputModalities) == 0 {
+			t.Fatalf("%s should have input modalities", id)
+		}
+		if meta.ContextWindow == 0 {
+			t.Fatalf("%s should have a context window", id)
+		}
 	}
 }
 
@@ -204,4 +469,39 @@ func TestModelsInputModalities(t *testing.T) {
 	if got := CodexSupportedModalities(nil); strings.Join(got, ",") != "text" {
 		t.Fatalf("codex supported for nil = %+v", got)
 	}
+}
+
+func TestIsKnownWithNormalization(t *testing.T) {
+	withModelFetchers(t, nil, nil, errors.New("no remote"))
+	if !IsKnown("opencode-go/minimax-m3") {
+		t.Fatal("opencode-go/ prefix should be normalized for IsKnown")
+	}
+}
+
+func TestKnownIDsFallbackOrderIsStable(t *testing.T) {
+	withModelFetchers(t, nil, nil, errors.New("no data"))
+	got := KnownIDs()
+	want := []string{
+		"minimax-m3", "minimax-m2.7", "minimax-m2.5",
+		"kimi-k2.6", "kimi-k2.5",
+		"glm-5.1", "glm-5",
+		"deepseek-v4-pro", "deepseek-v4-flash",
+		"qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus",
+		"mimo-v2-pro", "mimo-v2-omni", "mimo-v2.5-pro", "mimo-v2.5",
+		"hy3-preview",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i, id := range want {
+		if got[i] != id {
+			t.Fatalf("got[%d] = %q, want %q (full: %v)", i, got[i], id, got)
+		}
+	}
+	sortedCopy := append([]string(nil), want...)
+	sort.Strings(sortedCopy)
+	if sort.StringsAreSorted(got) {
+		t.Fatal("fallback should NOT be sorted, order must be preserved as defined")
+	}
+	_ = sortedCopy
 }

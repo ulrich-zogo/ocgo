@@ -2,12 +2,14 @@ package codex
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"ocgo/internal/config"
+	"ocgo/internal/models"
 )
 
 func TestWriteCodexProfile(t *testing.T) {
@@ -121,5 +123,93 @@ func TestCompareVersions(t *testing.T) {
 	}
 	if CompareVersions("0.87.0", "0.81.0") <= 0 {
 		t.Fatal("0.87.0 should be newer")
+	}
+}
+
+func TestWriteCodexModelCatalogRespectsOfficialOrder(t *testing.T) {
+	old := config.ModelMappingFile
+	config.ModelMappingFile = func() string { return filepath.Join(t.TempDir(), "model-mapping.json") }
+	t.Cleanup(func() { config.ModelMappingFile = old })
+
+	models.ResetFetchersForTest()
+	official := []models.OfficialModel{
+		{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
+		{ID: "kimi-k2.6", Object: "model", Created: 2, OwnedBy: "opencode"},
+		{ID: "glm-5.1", Object: "model", Created: 3, OwnedBy: "opencode"},
+	}
+	models.SetFetchersForTest(nil, official, nil, nil)
+	t.Cleanup(func() { models.ResetFetchersForTest() })
+
+	path := filepath.Join(t.TempDir(), "ocgo-models.json")
+	if err := WriteModelCatalog(path); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var catalog struct {
+		Models []struct {
+			Slug string `json:"slug"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(b, &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Models) < 3 {
+		t.Fatalf("catalog should have at least 3 models, got %d", len(catalog.Models))
+	}
+	if catalog.Models[0].Slug != "minimax-m3" {
+		t.Fatalf("catalog.Models[0].Slug = %q, want minimax-m3 (official order)", catalog.Models[0].Slug)
+	}
+	if catalog.Models[1].Slug != "kimi-k2.6" {
+		t.Fatalf("catalog.Models[1].Slug = %q, want kimi-k2.6", catalog.Models[1].Slug)
+	}
+	if catalog.Models[2].Slug != "glm-5.1" {
+		t.Fatalf("catalog.Models[2].Slug = %q, want glm-5.1", catalog.Models[2].Slug)
+	}
+}
+
+func TestWriteCodexModelCatalogIncludesMappingsAfterKnown(t *testing.T) {
+	mappingPath := filepath.Join(t.TempDir(), "model-mapping.json")
+	old := config.ModelMappingFile
+	config.ModelMappingFile = func() string { return mappingPath }
+	t.Cleanup(func() { config.ModelMappingFile = old })
+
+	models.ResetFetchersForTest()
+	models.SetFetchersForTest(nil, nil, errors.New("no official"), errors.New("no remote"))
+	t.Cleanup(func() { models.ResetFetchersForTest() })
+
+	mappingsContent := `{
+		"claude": {},
+		"codex": {"gpt-5": "deepseek-v4-pro", "gpt-4": "kimi-k2.6"}
+	}`
+	if err := os.WriteFile(mappingPath, []byte(mappingsContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(t.TempDir(), "ocgo-models.json")
+	if err := WriteModelCatalog(path); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(b)
+	if !strings.Contains(content, `"slug": "qwen3.7-plus"`) {
+		t.Fatalf("catalog should contain qwen3.7-plus from fallback:\n%s", content)
+	}
+	if !strings.Contains(content, `"slug": "hy3-preview"`) {
+		t.Fatalf("catalog should contain hy3-preview from fallback:\n%s", content)
+	}
+	if !strings.Contains(content, `"slug": "gpt-5"`) {
+		t.Fatalf("catalog should contain gpt-5 mapping:\n%s", content)
+	}
+	if !strings.Contains(content, `"slug": "gpt-4"`) {
+		t.Fatalf("catalog should contain gpt-4 mapping:\n%s", content)
+	}
+	if !strings.Contains(content, "OCGO mapping to deepseek-v4-pro") {
+		t.Fatalf("catalog should contain mapping description:\n%s", content)
 	}
 }
