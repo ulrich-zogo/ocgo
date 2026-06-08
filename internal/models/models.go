@@ -15,12 +15,21 @@ import (
 const (
 	remoteModelsURL   = "https://models.dev/api.json"
 	officialModelsURL = "https://opencode.ai/zen/go/v1/models"
+
+	officialObject  = "model"
+	officialOwnedBy = "opencode"
 )
 
+type OfficialModel struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
 type officialModelsResponse struct {
-	Data []struct {
-		ID string `json:"id"`
-	} `json:"data"`
+	Object string          `json:"object"`
+	Data   []OfficialModel `json:"data"`
 }
 
 type remoteModelInfo struct {
@@ -89,12 +98,24 @@ var (
 	officialModels = newLazyFetcher(fetchOfficialModels)
 
 	fallbackModelIDs = []string{
-		"glm-5.1", "glm-5",
-		"kimi-k2.6", "kimi-k2.5",
-		"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni",
-		"minimax-m3", "minimax-m2.7", "minimax-m2.5",
-		"deepseek-v4-pro", "deepseek-v4-flash",
-		"qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus",
+		"minimax-m3",
+		"minimax-m2.7",
+		"minimax-m2.5",
+		"kimi-k2.6",
+		"kimi-k2.5",
+		"glm-5.1",
+		"glm-5",
+		"deepseek-v4-pro",
+		"deepseek-v4-flash",
+		"qwen3.7-max",
+		"qwen3.7-plus",
+		"qwen3.6-plus",
+		"qwen3.5-plus",
+		"mimo-v2-pro",
+		"mimo-v2-omni",
+		"mimo-v2.5-pro",
+		"mimo-v2.5",
+		"hy3-preview",
 	}
 )
 
@@ -126,7 +147,7 @@ func fetchRemoteModels() (map[string]remoteModelInfo, error) {
 	return apiResp.OpenCodeGo.Models, nil
 }
 
-func fetchOfficialModels() ([]string, error) {
+func fetchOfficialModels() ([]OfficialModel, error) {
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, officialModelsURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create official models request: %w", err)
@@ -146,23 +167,50 @@ func fetchOfficialModels() ([]string, error) {
 		return nil, fmt.Errorf("read official models response: %w", err)
 	}
 
+	return parseOfficialModelsBody(body)
+}
+
+func parseOfficialModelsBody(body []byte) ([]OfficialModel, error) {
 	var apiResp officialModelsResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("unmarshal official models: %w", err)
 	}
 
-	ids := make([]string, len(apiResp.Data))
-	for i, d := range apiResp.Data {
-		ids[i] = d.ID
+	out := make([]OfficialModel, 0, len(apiResp.Data))
+	seen := make(map[string]struct{}, len(apiResp.Data))
+	for _, m := range apiResp.Data {
+		id := NormalizeID(m.ID)
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+
+		obj := m.Object
+		if obj == "" {
+			obj = officialObject
+		}
+		ownedBy := m.OwnedBy
+		if ownedBy == "" {
+			ownedBy = officialOwnedBy
+		}
+		out = append(out, OfficialModel{
+			ID:      id,
+			Object:  obj,
+			Created: m.Created,
+			OwnedBy: ownedBy,
+		})
 	}
-	return ids, nil
+	return out, nil
 }
 
 func getRemoteModels() (map[string]remoteModelInfo, error) {
 	return remoteModels.get()
 }
 
-func getOfficialModels() ([]string, error) {
+func getOfficialModels() ([]OfficialModel, error) {
 	return officialModels.get()
 }
 
@@ -172,25 +220,74 @@ func NormalizeID(id string) string {
 	return id
 }
 
-func KnownIDs() []string {
-	if ids, err := getOfficialModels(); err == nil && len(ids) > 0 {
-		out := append([]string(nil), ids...)
-		sort.Strings(out)
+func OfficialModels() ([]OfficialModel, error) {
+	models, err := getOfficialModels()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]OfficialModel, len(models))
+	copy(out, models)
+	return out, nil
+}
+
+func OfficialModelIDs() ([]string, error) {
+	models, err := getOfficialModels()
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(models))
+	for i, m := range models {
+		ids[i] = m.ID
+	}
+	return ids, nil
+}
+
+func KnownModels() []OfficialModel {
+	if models, err := getOfficialModels(); err == nil && len(models) > 0 {
+		out := make([]OfficialModel, len(models))
+		copy(out, models)
 		return out
 	}
 
-	if models, err := getRemoteModels(); err == nil && len(models) > 0 {
-		out := make([]string, 0, len(models))
-		for id := range models {
+	if remote, err := getRemoteModels(); err == nil && len(remote) > 0 {
+		ids := make([]string, 0, len(remote))
+		for id := range remote {
 			if strings.TrimSpace(id) != "" {
-				out = append(out, id)
+				ids = append(ids, id)
 			}
 		}
-		sort.Strings(out)
+		sort.Strings(ids)
+		out := make([]OfficialModel, len(ids))
+		for i, id := range ids {
+			out[i] = OfficialModel{
+				ID:      id,
+				Object:  officialObject,
+				Created: 0,
+				OwnedBy: officialOwnedBy,
+			}
+		}
 		return out
 	}
 
-	return append([]string(nil), fallbackModelIDs...)
+	out := make([]OfficialModel, len(fallbackModelIDs))
+	for i, id := range fallbackModelIDs {
+		out[i] = OfficialModel{
+			ID:      id,
+			Object:  officialObject,
+			Created: 0,
+			OwnedBy: officialOwnedBy,
+		}
+	}
+	return out
+}
+
+func KnownIDs() []string {
+	known := KnownModels()
+	ids := make([]string, 0, len(known))
+	for _, m := range known {
+		ids = append(ids, m.ID)
+	}
+	return ids
 }
 
 func IsKnown(id string) bool {
@@ -299,6 +396,10 @@ func Metadata(model string) ModelMetadata {
 		meta.ParallelToolCalls = true
 		meta.SupportsImageOriginal = true
 		meta.SupportsSearchTool = true
+	case "qwen3.7-plus":
+		meta.ParallelToolCalls = true
+	case "hy3-preview":
+		meta.ParallelToolCalls = true
 	case "kimi-k2.6", "kimi-k2.5", "mimo-v2-omni":
 		if len(meta.InputModalities) == 1 && meta.InputModalities[0] == "text" {
 			meta.InputModalities = []string{"text", "image"}

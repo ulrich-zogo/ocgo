@@ -98,7 +98,8 @@ func WriteModelCatalog(path string) error {
 	if err != nil {
 		mappings = mapping.DefaultModelMappings()
 	}
-	modelsArr := make([]map[string]any, 0, len(models.KnownIDs())+len(mappings["codex"]))
+	knownIDs := models.KnownIDs()
+	modelsArr := make([]map[string]any, 0, len(knownIDs)+len(mappings["codex"]))
 	seen := map[string]bool{}
 	addModel := func(id, target, description string, i int) {
 		if seen[id] {
@@ -141,7 +142,7 @@ func WriteModelCatalog(path string) error {
 			"supports_search_tool":             meta.SupportsSearchTool,
 		})
 	}
-	for i, id := range models.KnownIDs() {
+	for i, id := range knownIDs {
 		addModel(id, id, models.Metadata(id).Description, i)
 	}
 	keys := make([]string, 0, len(mappings["codex"]))
@@ -151,7 +152,7 @@ func WriteModelCatalog(path string) error {
 	sort.Strings(keys)
 	for i, source := range keys {
 		target := mappings["codex"][source]
-		addModel(source, target, "OCGO mapping to "+target, len(models.KnownIDs())+i)
+		addModel(source, target, "OCGO mapping to "+target, len(knownIDs)+i)
 	}
 	b, err := json.MarshalIndent(map[string]any{"models": modelsArr}, "", "  ")
 	if err != nil {
