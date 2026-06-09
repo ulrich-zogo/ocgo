@@ -95,6 +95,10 @@ func codexDesktopEnableCmd() *cobra.Command {
 }
 
 func runCodexDesktopEnableOpenCode(cmd *cobra.Command, modelFlag string, out io.Writer) error {
+	resolved, err := models.ResolveEffectiveModel(modelFlag)
+	if err != nil {
+		return err
+	}
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return err
@@ -102,10 +106,6 @@ func runCodexDesktopEnableOpenCode(cmd *cobra.Command, modelFlag string, out io.
 	ds := daemon.NewManager()
 	if _, _, err := ds.Start(cfg); err != nil {
 		return fmt.Errorf("start OCGO daemon: %w", err)
-	}
-	resolved, err := models.ResolveEffectiveModel(modelFlag)
-	if err != nil {
-		return err
 	}
 	base := process.BaseURL(cfg)
 	mgr := codex.NewManager()

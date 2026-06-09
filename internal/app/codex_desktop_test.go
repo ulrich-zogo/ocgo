@@ -325,3 +325,85 @@ func TestRootRegistersCodexDesktop(t *testing.T) {
 		t.Fatal("root command should register 'codex'")
 	}
 }
+
+func TestCodexDesktopEnableChatGPTPrintsRestoredPath(t *testing.T) {
+	home := setupCodexDesktopTestHome(t)
+	stateFile := filepath.Join(t.TempDir(), "codex-desktop-state.json")
+	t.Setenv("OCGO_CODEX_DESKTOP_STATE_FILE", stateFile)
+	original := "model = \"gpt-5\"\nmodel_provider = \"openai\"\n"
+	desktopConfig := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(desktopConfig), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(desktopConfig, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stub := &daemonStub{}
+	stub.install(t)
+	_ = home
+
+	root := NewRootCommand("test")
+	root.SetArgs([]string{"codex", "desktop", "enable", "opencode"})
+	var out1 bytes.Buffer
+	root.SetOut(&out1)
+	root.SetErr(&out1)
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	opencodeSt, err := codex.ReadDesktopState(stateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opencodeSt.BackupFile == "" {
+		t.Fatal("opencode state should carry a backup file path")
+	}
+
+	root2 := NewRootCommand("test")
+	root2.SetArgs([]string{"codex", "desktop", "enable", "chatgpt"})
+	var out2 bytes.Buffer
+	root2.SetOut(&out2)
+	root2.SetErr(&out2)
+	if err := root2.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out2.String()
+	if !strings.Contains(got, "Codex Desktop restored to ChatGPT/OpenAI configuration") {
+		t.Fatalf("output missing chatgpt restore message:\n%s", got)
+	}
+	expected := "Restored: " + opencodeSt.BackupFile
+	if !strings.Contains(got, expected) {
+		t.Fatalf("output missing %q, got:\n%s", expected, got)
+	}
+}
+
+func TestCodexDesktopEnableOpenCodeInvalidModelDoesNotStartDaemon(t *testing.T) {
+	home := setupCodexDesktopTestHome(t)
+	stateFile := filepath.Join(t.TempDir(), "codex-desktop-state.json")
+	t.Setenv("OCGO_CODEX_DESKTOP_STATE_FILE", stateFile)
+	stub := &daemonStub{}
+	stub.install(t)
+	_ = home
+
+	root := NewRootCommand("test")
+	root.SetArgs([]string{"codex", "desktop", "enable", "opencode", "--model", "does-not-exist"})
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid model")
+	}
+	if !strings.Contains(err.Error(), "unknown OpenCode Go model") {
+		t.Fatalf("error should mention 'unknown OpenCode Go model', got: %v", err)
+	}
+	if stub.startCalls.Load() != 0 {
+		t.Errorf("daemon Start should not be called when model is invalid; got %d calls", stub.startCalls.Load())
+	}
+	if _, statErr := os.Stat(filepath.Join(home, ".codex", "config.toml")); statErr == nil {
+		t.Errorf("desktop config should not be written when model is invalid")
+	}
+	if _, statErr := os.Stat(stateFile); statErr == nil {
+		t.Errorf("desktop state should not be written when model is invalid")
+	}
+}
