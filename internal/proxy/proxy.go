@@ -229,78 +229,7 @@ func ProxyChatCompletions(w http.ResponseWriter, r *http.Request, cfg config.Con
 }
 
 func ProxyResponses(w http.ResponseWriter, r *http.Request, cfg config.Config) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var rr compat.ResponsesRequest
-	if err := json.NewDecoder(r.Body).Decode(&rr); err != nil {
-		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	model := rr.Model
-	or := ResponsesToChat(rr)
-
-	if err := ValidateImageSupport(or); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if models.UsesAnthropicEndpoint(model) {
-		ar := ChatToAnthropic(or)
-		ar.Model = mapping.ResolveToolModel("claude", model)
-
-		resp, err := ForwardAnthropic(r.Context(), cfg, ar)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("forward: %v", err), http.StatusBadGateway)
-			return
-		}
-		defer resp.Body.Close()
-
-		CopyHeaders(w.Header(), resp.Header)
-		w.WriteHeader(resp.StatusCode)
-
-		if rr.Stream {
-			StreamResponsesFromAnthropic(w, resp.Body, model)
-		} else {
-			WriteResponsesResponseFromAnthropic(w, resp.Body, model)
-		}
-		return
-	}
-
-	or.Model = mapping.ResolveToolModel("codex", model)
-
-	body, err := json.Marshal(or)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("marshal request: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, config.OpenAIURL, bytes.NewReader(body))
-	if err != nil {
-		http.Error(w, fmt.Sprintf("create request: %v", err), http.StatusInternalServerError)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("forward: %v", err), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	CopyHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-
-	if or.Stream {
-		StreamResponses(w, resp.Body, model)
-	} else {
-		WriteResponsesResponse(w, resp.Body, model)
-	}
+	ResponsesHandler(w, r, cfg)
 }
 
 func CopyHeaders(dst, src http.Header) {
