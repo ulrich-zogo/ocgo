@@ -62,8 +62,13 @@ func (m Manager) EnableDesktopOpenCode(baseURL string, explicitModel string) (De
 		Model:      explicitModel,
 		BackupFile: backupFile,
 	}
-	if err := WriteDesktopState(m.DesktopStateFile(), st); err != nil {
-		return DesktopState{}, err
+	if err := writeStateFunc(m.DesktopStateFile(), st); err != nil {
+		if backupFile != "" {
+			if rbErr := m.RestoreDesktopConfig(backupFile); rbErr != nil {
+				return DesktopState{}, fmt.Errorf("write codex desktop state (%w); rollback also failed: %v", err, rbErr)
+			}
+		}
+		return DesktopState{}, fmt.Errorf("write codex desktop state (%w); desktop config rolled back from backup", err)
 	}
 	return st, nil
 }
@@ -83,9 +88,10 @@ func (m Manager) EnableDesktopChatGPT() (DesktopState, error) {
 		return DesktopState{}, err
 	}
 	st := DesktopState{
-		Version:   DesktopStateVersion,
-		Mode:      DesktopModeChatGPT,
-		UpdatedAt: time.Now().UTC(),
+		Version:    DesktopStateVersion,
+		Mode:       DesktopModeChatGPT,
+		UpdatedAt:  time.Now().UTC(),
+		BackupFile: current.BackupFile,
 	}
 	if err := WriteDesktopState(m.DesktopStateFile(), st); err != nil {
 		return DesktopState{}, err
