@@ -1248,6 +1248,40 @@ func ResponsesInputToMessages(raw json.RawMessage) []OAIMessage {
 					Arguments: args,
 				},
 			})
+		case "function_call":
+			flushPending()
+			callID, _ := item["call_id"].(string)
+			if callID == "" {
+				callID, _ = item["id"].(string)
+			}
+			name, _ := item["name"].(string)
+			args, _ := item["arguments"].(string)
+			messages = append(messages, OAIMessage{
+				Role: "assistant",
+				ToolCalls: []OAIToolCall{{
+					ID:   callID,
+					Type: "function",
+					Function: OAICallFunction{
+						Name:      name,
+						Arguments: args,
+					},
+				}},
+			})
+		case "function_call_output":
+			flushPending()
+			callID, _ := item["call_id"].(string)
+			output := item["output"]
+			var content any
+			if s, ok := output.(string); ok {
+				content = s
+			} else {
+				content = output
+			}
+			messages = append(messages, OAIMessage{
+				Role:       "tool",
+				ToolCallID: callID,
+				Content:    content,
+			})
 		case "tool_result":
 			flushPending()
 			callID, _ := item["call_id"].(string)
