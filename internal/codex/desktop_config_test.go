@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -314,5 +315,74 @@ func TestDesktopStatusOpenCode(t *testing.T) {
 	}
 	if rep.BackupFile == "" {
 		t.Error("BackupFile = empty, want non-empty")
+	}
+}
+
+func TestEnableDesktopOpenCodeRollsBackOnStateWriteFailure(t *testing.T) {
+	redirectHomeForCodex(t)
+	paths := tempDesktopPaths(t)
+	if err := os.MkdirAll(filepath.Dir(paths.DesktopConfigFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := "model = \"gpt-5\"\nmodel_provider = \"openai\"\n"
+	if err := os.WriteFile(paths.DesktopConfigFile, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := Manager{Paths: paths}
+	t.Setenv("OCGO_CODEX_DESKTOP_STATE_FILE", filepath.Join(t.TempDir(), "codex-desktop-state.json"))
+
+	restore := SetWriteStateFuncForTest(func(path string, state DesktopState) error {
+		return errors.New("simulated write state failure")
+	})
+	defer restore()
+
+	_, err := mgr.EnableDesktopOpenCode("http://127.0.0.1:3456", "minimax-m3")
+	if err == nil {
+		t.Fatal("expected error when WriteDesktopState fails")
+	}
+	if !strings.Contains(err.Error(), "simulated write state failure") {
+		t.Errorf("error should mention the underlying cause: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rolled back") {
+		t.Errorf("error should mention rollback: %v", err)
+	}
+	got, readErr := os.ReadFile(paths.DesktopConfigFile)
+	if readErr != nil {
+		t.Fatalf("desktop config should still exist after rollback: %v", readErr)
+	}
+	if string(got) != original {
+		t.Errorf("desktop config should be restored to original after rollback; got %q, want %q", got, original)
+	}
+}
+
+func TestEnableDesktopChatGPTPreservesBackupFileInState(t *testing.T) {
+	redirectHomeForCodex(t)
+	paths := tempDesktopPaths(t)
+	if err := os.MkdirAll(filepath.Dir(paths.DesktopConfigFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := "model = \"gpt-5\"\n"
+	if err := os.WriteFile(paths.DesktopConfigFile, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := Manager{Paths: paths}
+	t.Setenv("OCGO_CODEX_DESKTOP_STATE_FILE", filepath.Join(t.TempDir(), "codex-desktop-state.json"))
+
+	if _, err := mgr.EnableDesktopOpenCode("http://127.0.0.1:3456", "minimax-m3"); err != nil {
+		t.Fatalf("EnableDesktopOpenCode: %v", err)
+	}
+	st, err := mgr.EnableDesktopChatGPT()
+	if err != nil {
+		t.Fatalf("EnableDesktopChatGPT: %v", err)
+	}
+	if st.BackupFile == "" {
+		t.Fatal("returned state BackupFile = empty, want non-empty (preserved from opencode state)")
+	}
+	onDisk, err := ReadDesktopState(mgr.DesktopStateFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if onDisk.BackupFile != st.BackupFile {
+		t.Errorf("on-disk state BackupFile = %q, want %q", onDisk.BackupFile, st.BackupFile)
 	}
 }
