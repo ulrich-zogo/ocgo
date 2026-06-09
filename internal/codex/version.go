@@ -9,15 +9,22 @@ import (
 
 const minCodexVersion = "0.81.0"
 
+var (
+	execLookPath      = exec.LookPath
+	execCommandOutput = func(name string, args ...string) ([]byte, error) {
+		return exec.Command(name, args...).Output()
+	}
+)
+
 func (m Manager) CheckVersion() error {
 	return checkCodexVersion()
 }
 
 func checkCodexVersion() error {
-	if _, err := exec.LookPath("codex"); err != nil {
+	if _, err := execLookPath("codex"); err != nil {
 		return fmt.Errorf("codex is not installed, install with: npm install -g @openai/codex")
 	}
-	out, err := exec.Command("codex", "--version").Output()
+	out, err := execCommandOutput("codex", "--version")
 	if err != nil {
 		return fmt.Errorf("failed to get codex version: %w", err)
 	}
