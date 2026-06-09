@@ -38,7 +38,7 @@ func SetFetchersForTest(remote map[string]remoteModelInfo, official []OfficialMo
 
 func ResetFetchersForTest() {
 	remoteModels = newLazyFetcher(fetchRemoteModels)
-	officialModels = newLazyFetcher(fetchOfficialModels)
+	officialModels = newLazyFetcher(fetchOfficialModelsAndCache)
 }
 
 func SetCacheFileForTest(path string) func() {
@@ -53,4 +53,14 @@ func SetCacheFileForTest(path string) func() {
 func ResetAllForTest() {
 	ResetFetchersForTest()
 	CatalogCacheFile = config.ModelCatalogCacheFile
+}
+
+func SetOfficialFetcherForTest(fn func() ([]OfficialModel, error)) func() {
+	old := fetchOfficialModelsFunc
+	fetchOfficialModelsFunc = fn
+	officialModels = newLazyFetcher(fetchOfficialModelsAndCache)
+	return func() {
+		fetchOfficialModelsFunc = old
+		officialModels = newLazyFetcher(fetchOfficialModelsAndCache)
+	}
 }

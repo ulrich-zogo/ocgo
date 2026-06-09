@@ -657,19 +657,18 @@ func TestReadCatalogCacheNormalizesAndDedups(t *testing.T) {
 func TestKnownModelsWithSourceReturnsOfficialAndWritesCache(t *testing.T) {
 	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
 	oldRemoteModels := remoteModels
-	oldOfficialModels := officialModels
-	remoteModels = newLazyFetcher(func() (map[string]remoteModelInfo, error) {
-		return nil, errors.New("no remote")
-	})
-	officialModels = newLazyFetcher(func() ([]OfficialModel, error) {
+	restoreOfficial := SetOfficialFetcherForTest(func() ([]OfficialModel, error) {
 		return []OfficialModel{
 			{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
 		}, nil
 	})
+	remoteModels = newLazyFetcher(func() (map[string]remoteModelInfo, error) {
+		return nil, errors.New("no remote")
+	})
 	restoreCache := SetCacheFileForTest(cachePath)
 	t.Cleanup(func() {
 		remoteModels = oldRemoteModels
-		officialModels = oldOfficialModels
+		restoreOfficial()
 		restoreCache()
 	})
 
@@ -677,18 +676,18 @@ func TestKnownModelsWithSourceReturnsOfficialAndWritesCache(t *testing.T) {
 	if source != sourceOfficial {
 		t.Fatalf("source = %q, want %q", source, sourceOfficial)
 	}
-	if len(models) != 1 || models[0].ID != "minimax-m3" {
+	if len(models) != 1 || models[0].ID != "minimax-m3" || models[0].Created != 1 {
 		t.Fatalf("models = %+v", models)
 	}
-	if _, err := os.Stat(cachePath); err != nil {
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
 		t.Fatalf("cache file should exist after official success: %v", err)
 	}
-	data, _ := os.ReadFile(cachePath)
 	var cache CatalogCache
 	if err := json.Unmarshal(data, &cache); err != nil {
 		t.Fatal(err)
 	}
-	if len(cache.Models) != 1 || cache.Models[0].ID != "minimax-m3" {
+	if len(cache.Models) != 1 || cache.Models[0].ID != "minimax-m3" || cache.Models[0].Created != 1 {
 		t.Fatalf("cache models = %+v", cache.Models)
 	}
 	if cache.Source != sourceOfficial {
@@ -825,26 +824,121 @@ func TestKnownModelsWithSourceIgnoresIncompatibleVersion(t *testing.T) {
 func TestRefreshOfficialModelsWritesCacheOnSuccess(t *testing.T) {
 	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
 	restoreCache := SetCacheFileForTest(cachePath)
-	t.Cleanup(restoreCache)
-	oldRemote := remoteModels
-	oldOfficial := officialModels
-	remoteModels = newLazyFetcher(func() (map[string]remoteModelInfo, error) {
-		return nil, errors.New("no remote")
-	})
-	officialModels = newLazyFetcher(func() ([]OfficialModel, error) {
+	restoreOfficial := SetOfficialFetcherForTest(func() ([]OfficialModel, error) {
 		return []OfficialModel{
 			{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
 		}, nil
 	})
 	t.Cleanup(func() {
-		remoteModels = oldRemote
-		officialModels = oldOfficial
+		restoreCache()
+		restoreOfficial()
 	})
 
 	if err := RefreshOfficialModels(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(cachePath); err != nil {
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
 		t.Fatalf("cache file should exist after RefreshOfficialModels success: %v", err)
+	}
+	var cache CatalogCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		t.Fatal(err)
+	}
+	if len(cache.Models) != 1 || cache.Models[0].ID != "minimax-m3" || cache.Models[0].Created != 1 {
+		t.Fatalf("cache models = %+v (want exactly the model returned by the fetcher)", cache.Models)
+	}
+	if cache.Source != sourceOfficial {
+		t.Fatalf("cache source = %q, want %q", cache.Source, sourceOfficial)
+	}
+
+	got, _ := KnownModelsWithSource()
+	if len(got) != 1 || got[0].ID != "minimax-m3" {
+		t.Fatalf("KnownModels after refresh = %+v, want refresh result visible", got)
+	}
+}
+
+func TestRefreshOfficialModelsReturnsErrorOnFailure(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	restoreCache := SetCacheFileForTest(cachePath)
+	restoreOfficial := SetOfficialFetcherForTest(func() ([]OfficialModel, error) {
+		return nil, errors.New("upstream down")
+	})
+	t.Cleanup(func() {
+		restoreCache()
+		restoreOfficial()
+	})
+
+	if err := RefreshOfficialModels(); err == nil {
+		t.Fatal("expected RefreshOfficialModels to return error when fetcher fails")
+	}
+	if _, err := os.Stat(cachePath); err == nil {
+		t.Fatal("cache should not be written when fetcher fails")
+	}
+}
+
+func TestKnownModelsWithSourceDoesNotRewriteCacheOnRead(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	originalFetchedAt := time.Date(2026, 6, 8, 15, 30, 0, 0, time.UTC)
+	original := []OfficialModel{
+		{ID: "minimax-m3", Object: "model", Created: 99, OwnedBy: "opencode"},
+	}
+	if err := WriteCatalogCache(cachePath, original, sourceOfficial, originalFetchedAt); err != nil {
+		t.Fatal(err)
+	}
+	restoreCache := SetCacheFileForTest(cachePath)
+	restoreOfficial := SetOfficialFetcherForTest(func() ([]OfficialModel, error) {
+		return []OfficialModel{
+			{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
+		}, nil
+	})
+	t.Cleanup(func() {
+		restoreCache()
+		restoreOfficial()
+	})
+
+	got, source := KnownModelsWithSource()
+	if source != sourceOfficial {
+		t.Fatalf("source = %q, want %q", source, sourceOfficial)
+	}
+	if len(got) != 1 || got[0].Created != 1 {
+		t.Fatalf("got = %+v, want official models from injected fetcher", got)
+	}
+
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cache CatalogCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		t.Fatal(err)
+	}
+	firstFetchedAt := cache.FetchedAt
+	if !firstFetchedAt.After(originalFetchedAt) {
+		t.Fatalf("first call should rewrite cache with a fresher FetchedAt (got %v, original %v)", firstFetchedAt, originalFetchedAt)
+	}
+	if len(cache.Models) != 1 || cache.Models[0].Created != 1 {
+		t.Fatalf("cache models = %+v, want the freshly fetched models", cache.Models)
+	}
+
+	for i := 0; i < 5; i++ {
+		got, source := KnownModelsWithSource()
+		if source != sourceOfficial {
+			t.Fatalf("iteration %d: source = %q, want %q", i, source, sourceOfficial)
+		}
+		if len(got) != 1 || got[0].Created != 1 {
+			t.Fatalf("iteration %d: got = %+v", i, got)
+		}
+	}
+
+	data, err = os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cache); err != nil {
+		t.Fatal(err)
+	}
+	if !cache.FetchedAt.Equal(firstFetchedAt) {
+		t.Fatalf("cache FetchedAt changed from %v to %v (subsequent KnownModelsWithSource calls should not touch the cache)", firstFetchedAt, cache.FetchedAt)
 	}
 }

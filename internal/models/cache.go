@@ -103,10 +103,4 @@ func normalizeOfficialModels(in []OfficialModel) []OfficialModel {
 	return out
 }
 
-func writeOfficialCache(models []OfficialModel) {
-	if len(models) == 0 {
-		return
-	}
-	path := CatalogCacheFile()
-	_ = WriteCatalogCache(path, models, sourceOfficial, time.Now().UTC())
-}
+

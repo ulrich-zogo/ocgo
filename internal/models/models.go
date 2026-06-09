@@ -93,9 +93,17 @@ func (f *lazyFetcher[T]) refresh() {
 	f.fetched = true
 }
 
+func (f *lazyFetcher[T]) set(data T, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.data = data
+	f.err = err
+	f.fetched = true
+}
+
 var (
 	remoteModels   = newLazyFetcher(fetchRemoteModels)
-	officialModels = newLazyFetcher(fetchOfficialModels)
+	officialModels = newLazyFetcher(fetchOfficialModelsAndCache)
 
 	fallbackModelIDs = []string{
 		"minimax-m3",
@@ -170,6 +178,19 @@ func fetchOfficialModels() ([]OfficialModel, error) {
 	return parseOfficialModelsBody(body)
 }
 
+var fetchOfficialModelsFunc = fetchOfficialModels
+
+func fetchOfficialModelsAndCache() ([]OfficialModel, error) {
+	models, err := fetchOfficialModelsFunc()
+	if err != nil {
+		return nil, err
+	}
+	if len(models) > 0 {
+		_ = WriteCatalogCache(CatalogCacheFile(), models, sourceOfficial, time.Now().UTC())
+	}
+	return models, nil
+}
+
 func parseOfficialModelsBody(body []byte) ([]OfficialModel, error) {
 	var apiResp officialModelsResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
@@ -218,7 +239,6 @@ func KnownModelsWithSource() ([]OfficialModel, string) {
 	if models, err := getOfficialModels(); err == nil && len(models) > 0 {
 		out := make([]OfficialModel, len(models))
 		copy(out, models)
-		writeOfficialCache(out)
 		return out, sourceOfficial
 	}
 
@@ -305,22 +325,12 @@ func RefreshAll() {
 }
 
 func RefreshOfficialModels() error {
-	models, err := fetchOfficialModels()
+	models, err := fetchOfficialModelsAndCache()
 	if err != nil {
-		officialModels = newLazyFetcher(func() ([]OfficialModel, error) {
-			return models, err
-		})
+		officialModels.set(nil, err)
 		return err
 	}
-	if len(models) == 0 {
-		return nil
-	}
-	officialModels = newLazyFetcher(func() ([]OfficialModel, error) {
-		out := make([]OfficialModel, len(models))
-		copy(out, models)
-		return out, nil
-	})
-	writeOfficialCache(models)
+	officialModels.set(models, nil)
 	return nil
 }
 
