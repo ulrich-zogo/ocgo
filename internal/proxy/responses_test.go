@@ -970,6 +970,39 @@ func TestResponsesHandlerStreamingToolCallAccumulator(t *testing.T) {
 	if got, _ := doneItem["arguments"].(string); got != `{"id":"1"}` {
 		t.Errorf("done item arguments = %q, want %q", got, `{"id":"1"}`)
 	}
+
+	deltas := extractAllSSEData(t, body, "response.function_call_arguments.delta")
+	if len(deltas) != 2 {
+		t.Fatalf("function_call_arguments.delta count = %d, want 2; deltas=%q", len(deltas), deltas)
+	}
+	wantDeltas := []string{`{"id":"`, `1"}`}
+	concat := ""
+	for i, d := range deltas {
+		var parsed struct {
+			Type    string `json:"type"`
+			ItemID  string `json:"item_id"`
+			Delta   string `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(d), &parsed); err != nil {
+			t.Fatalf("delta[%d] not JSON: %v", i, err)
+		}
+		if parsed.Type != "response.function_call_arguments.delta" {
+			t.Errorf("delta[%d].type = %q, want response.function_call_arguments.delta", i, parsed.Type)
+		}
+		if parsed.ItemID != "call_1" {
+			t.Errorf("delta[%d].item_id = %q, want call_1", i, parsed.ItemID)
+		}
+		if parsed.Delta != wantDeltas[i] {
+			t.Errorf("delta[%d].delta = %q, want %q", i, parsed.Delta, wantDeltas[i])
+		}
+		concat += parsed.Delta
+	}
+	if concat != `{"id":"1"}` {
+		t.Errorf("concat of deltas = %q, want %q", concat, `{"id":"1"}`)
+	}
+	if concat != doneItem["arguments"] {
+		t.Errorf("concat of deltas (%q) must equal done.arguments (%q)", concat, doneItem["arguments"])
+	}
 }
 
 func extractSSEData(t *testing.T, body, eventName string) string {
@@ -985,6 +1018,22 @@ func extractSSEData(t *testing.T, body, eventName string) string {
 		}
 	}
 	return ""
+}
+
+func extractAllSSEData(t *testing.T, body, eventName string) []string {
+	t.Helper()
+	prefix := "event: " + eventName
+	lines := strings.Split(body, "\n")
+	var out []string
+	for i, line := range lines {
+		if line == prefix && i+1 < len(lines) {
+			dataLine := lines[i+1]
+			if strings.HasPrefix(dataLine, "data: ") {
+				out = append(out, strings.TrimPrefix(dataLine, "data: "))
+			}
+		}
+	}
+	return out
 }
 
 func TestResponsesHandlerStreamingMalformedChunk(t *testing.T) {
@@ -1217,6 +1266,94 @@ func TestStreamChatCompletionAsResponsesEmptyBody(t *testing.T) {
 	if !strings.Contains(body, "data: [DONE]") {
 		t.Errorf("expected [DONE] for empty body; got: %s", body)
 	}
+}
+
+func TestResponseStreamToolCallAccumulatorDeltasAreIncremental(t *testing.T) {
+	acc := newResponseStreamToolCallAccumulator()
+	acc.Absorb(responseStreamToolCallDelta{Index: 0, ID: "call_1", Name: "lookup"})
+	evs := acc.DrainEvents()
+	if !eventHasOutputItemAdded(evs) {
+		t.Errorf("first chunk with ID should emit output_item.added; got %v", evs)
+	}
+	got := decodeToolDeltas(t, evs)
+	if len(got) != 0 {
+		t.Errorf("first chunk (empty args) should not emit delta; got %v", got)
+	}
+	if !acc.HasEmittedAdded(0) {
+		t.Errorf("first chunk with ID should mark the call as Added")
+	}
+
+	acc.Absorb(responseStreamToolCallDelta{Index: 0, Arguments: `{"id":"`})
+	got = decodeToolDeltas(t, acc.DrainEvents())
+	if len(got) != 1 || got[0] != `{"id":"` {
+		t.Errorf("second chunk delta = %v, want [{\"id\":\"\"]", got)
+	}
+
+	acc.Absorb(responseStreamToolCallDelta{Index: 0, Arguments: `1"}`})
+	got = decodeToolDeltas(t, acc.DrainEvents())
+	if len(got) != 1 || got[0] != `1"}` {
+		t.Errorf("third chunk delta = %v, want [1\"}]", got)
+	}
+
+	acc.Absorb(responseStreamToolCallDelta{Index: 0, Arguments: ""})
+	got = decodeToolDeltas(t, acc.DrainEvents())
+	if len(got) != 0 {
+		t.Errorf("empty args delta should be a no-op; got %v", got)
+	}
+
+	done := decodeToolDeltas(t, acc.FlushDone())
+	if len(done) != 1 || done[0] != `{"id":"1"}` {
+		t.Errorf("done item arguments = %v, want {\"id\":\"1\"}", done)
+	}
+}
+
+func deltasContainAdded(acc *responseStreamToolCallAccumulator) bool {
+	return acc.HasEmittedAdded(0)
+}
+
+func eventHasOutputItemAdded(events []responseStreamEvent) bool {
+	for _, ev := range events {
+		if ev.Event == "response.output_item.added" {
+			return true
+		}
+	}
+	return false
+}
+
+// ResponseStreamAccumulatorSnapshot returns a snapshot of which events
+// have been emitted so far, without consuming future drains. It is
+// used by the test only to confirm the Added event was emitted on the
+// first chunk.
+func (a *responseStreamToolCallAccumulator) HasEmittedAdded(index int) bool {
+	state, ok := a.calls[index]
+	return ok && state.Added
+}
+
+func decodeToolDeltas(t *testing.T, events []responseStreamEvent) []string {
+	t.Helper()
+	var out []string
+	for _, ev := range events {
+		if ev.Event == "response.function_call_arguments.delta" {
+			var parsed struct {
+				Delta string `json:"delta"`
+			}
+			if err := json.Unmarshal([]byte(ev.Data), &parsed); err != nil {
+				t.Fatalf("delta not JSON: %v", err)
+			}
+			out = append(out, parsed.Delta)
+			continue
+		}
+		if ev.Event == "response.output_item.done" {
+			var parsed struct {
+				Arguments string `json:"arguments"`
+			}
+			if err := json.Unmarshal([]byte(ev.Data), &parsed); err != nil {
+				t.Fatalf("done item not JSON: %v", err)
+			}
+			out = append(out, parsed.Arguments)
+		}
+	}
+	return out
 }
 
 func TestResponsesHandlerJSONDecodeErrorShape(t *testing.T) {
