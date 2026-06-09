@@ -404,11 +404,12 @@ type responseStreamToolCallAccumulator struct {
 }
 
 type responseStreamToolCallState struct {
-	ID        string
-	Name      string
-	Arguments strings.Builder
-	Added     bool
-	Final     bool
+	ID                  string
+	Name                string
+	Arguments           strings.Builder
+	EmittedArgumentsLen int
+	Added               bool
+	Final               bool
 }
 
 type responseStreamEvent struct {
@@ -474,10 +475,15 @@ func (a *responseStreamToolCallAccumulator) DrainEvents() []responseStreamEvent 
 		if args == "" {
 			continue
 		}
+		if len(args) <= state.EmittedArgumentsLen {
+			continue
+		}
+		delta := args[state.EmittedArgumentsLen:]
+		state.EmittedArgumentsLen = len(args)
 		argDelta := map[string]any{
 			"type":    "response.function_call_arguments.delta",
 			"item_id": state.ID,
-			"delta":   args,
+			"delta":   delta,
 		}
 		if b, err := json.Marshal(argDelta); err == nil {
 			events = append(events, responseStreamEvent{
