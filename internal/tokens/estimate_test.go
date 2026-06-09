@@ -335,3 +335,128 @@ func TestEstimateDeterministicAcrossShapes(t *testing.T) {
 		t.Errorf("non-deterministic estimate: %d vs %d", e1.InputTokens, e2.InputTokens)
 	}
 }
+
+// --- strict decode (rejects trailing JSON after the first object) ---
+
+func TestDecodeJSONObjectStrictAcceptsValid(t *testing.T) {
+	var m map[string]any
+	if err := DecodeJSONObjectStrict([]byte(`{"a":1}`), &m); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m["a"] == nil {
+		t.Errorf("expected a=1, got %v", m)
+	}
+}
+
+func TestDecodeJSONObjectStrictAcceptsLeadingAndTrailingWhitespace(t *testing.T) {
+	var m map[string]any
+	if err := DecodeJSONObjectStrict([]byte("  \n\t {\"a\":1}\n\t  "), &m); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m["a"] == nil {
+		t.Errorf("expected a=1, got %v", m)
+	}
+}
+
+func TestDecodeJSONObjectStrictRejectsEmpty(t *testing.T) {
+	var m map[string]any
+	if err := DecodeJSONObjectStrict([]byte("   "), &m); err == nil {
+		t.Fatalf("expected error for empty body")
+	} else if !errors.Is(err, ErrEmptyBody{}) {
+		t.Errorf("error = %v, want ErrEmptyBody", err)
+	}
+}
+
+func TestDecodeJSONObjectStrictRejectsNonObject(t *testing.T) {
+	var m map[string]any
+	if err := DecodeJSONObjectStrict([]byte(`[1,2,3]`), &m); err == nil {
+		t.Fatalf("expected error for array")
+	}
+	if err := DecodeJSONObjectStrict([]byte(`"hi"`), &m); err == nil {
+		t.Fatalf("expected error for string")
+	}
+	if err := DecodeJSONObjectStrict([]byte(`42`), &m); err == nil {
+		t.Fatalf("expected error for number")
+	}
+}
+
+func TestDecodeJSONObjectStrictRejectsTrailingJSON(t *testing.T) {
+	var m map[string]any
+	body := []byte(`{"messages":[{"role":"user","content":"hi"}]} {"extra":true}`)
+	err := DecodeJSONObjectStrict(body, &m)
+	if err == nil {
+		t.Fatalf("expected error for trailing JSON")
+	}
+	if !errors.Is(err, ErrTrailingJSON) {
+		t.Errorf("error = %v, want ErrTrailingJSON", err)
+	}
+}
+
+func TestDecodeJSONObjectStrictRejectsTrailingNumber(t *testing.T) {
+	var m map[string]any
+	if err := DecodeJSONObjectStrict([]byte(`{"a":1} 42`), &m); err == nil {
+		t.Fatalf("expected error for trailing number")
+	} else if !errors.Is(err, ErrTrailingJSON) {
+		t.Errorf("error = %v, want ErrTrailingJSON", err)
+	}
+}
+
+func TestDecodeJSONObjectStrictRejectsSyntaxError(t *testing.T) {
+	var m map[string]any
+	if err := DecodeJSONObjectStrict([]byte(`{not json`), &m); err == nil {
+		t.Fatalf("expected error for syntax error")
+	} else if errors.Is(err, ErrTrailingJSON) {
+		t.Errorf("error = %v, want syntax error not trailing", err)
+	}
+}
+
+func TestEstimateAnthropicCountTokensTrailingJSONIsError(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"hi"}]} {"extra":true}`)
+	_, err := EstimateAnthropicCountTokens(body)
+	if err == nil {
+		t.Fatalf("expected error for trailing JSON")
+	}
+	if !errors.Is(err, ErrTrailingJSON) {
+		t.Errorf("error = %v, want ErrTrailingJSON", err)
+	}
+}
+
+func TestEstimateOpenAIChatTokensTrailingJSONIsError(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"hi"}]} {"extra":true}`)
+	_, err := EstimateOpenAIChatTokens(body)
+	if err == nil {
+		t.Fatalf("expected error for trailing JSON")
+	}
+	if !errors.Is(err, ErrTrailingJSON) {
+		t.Errorf("error = %v, want ErrTrailingJSON", err)
+	}
+}
+
+func TestEstimateResponsesTokensTrailingJSONIsError(t *testing.T) {
+	body := []byte(`{"input":"hi"} {"extra":true}`)
+	_, err := EstimateResponsesTokens(body)
+	if err == nil {
+		t.Fatalf("expected error for trailing JSON")
+	}
+	if !errors.Is(err, ErrTrailingJSON) {
+		t.Errorf("error = %v, want ErrTrailingJSON", err)
+	}
+}
+
+func TestEstimateAnthropicCountTokensNonObjectIsError(t *testing.T) {
+	if _, err := EstimateAnthropicCountTokens([]byte(`[1,2,3]`)); err == nil {
+		t.Fatalf("expected error for non-object body")
+	}
+}
+
+func TestEstimateOpenAIChatTokensNonObjectIsError(t *testing.T) {
+	if _, err := EstimateOpenAIChatTokens([]byte(`"hello"`)); err == nil {
+		t.Fatalf("expected error for non-object body")
+	}
+}
+
+func TestEstimateResponsesTokensNonObjectIsError(t *testing.T) {
+	if _, err := EstimateResponsesTokens([]byte(`42`)); err == nil {
+		t.Fatalf("expected error for non-object body")
+	}
+}

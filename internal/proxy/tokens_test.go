@@ -231,3 +231,129 @@ func TestCountTokensIsDeterministic(t *testing.T) {
 // that any tool description adds to the estimate (it does not include
 // the name/description text which the test does not pre-count).
 const ToolOverheadTokensFloor = 8
+
+// --- strict decode (rejects trailing JSON after the first object) ---
+
+func TestCountTokensRejectsTrailingJSON(t *testing.T) {
+	mux := newCountTokensMux()
+	w := postCountTokens(t, mux,
+		`{"messages":[{"role":"user","content":"hi"}]} {"extra":true}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("trailing-JSON status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"invalid_json"`) {
+		t.Errorf("trailing-JSON body = %s, want code invalid_json", w.Body.String())
+	}
+}
+
+func TestCountTokensRejectsTrailingNumber(t *testing.T) {
+	mux := newCountTokensMux()
+	w := postCountTokens(t, mux, `{"messages":[{"role":"user","content":"hi"}]} 42`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("trailing-number status = %d, want 400", w.Code)
+	}
+}
+
+func TestCountTokensRejectsNonObject(t *testing.T) {
+	mux := newCountTokensMux()
+	w := postCountTokens(t, mux, `[1,2,3]`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("array status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"invalid_json"`) {
+		t.Errorf("array body = %s, want code invalid_json", w.Body.String())
+	}
+}
+
+func TestCountTokensRejectsTopLevelString(t *testing.T) {
+	mux := newCountTokensMux()
+	w := postCountTokens(t, mux, `"hello"`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("string status = %d, want 400", w.Code)
+	}
+}
+
+// --- OpenAI Chat shape detection (no "system" key, no "tools" key) ---
+
+func TestCountTokensOpenAIImageURLWithoutToolsRoutesToOpenAI(t *testing.T) {
+	mux := newCountTokensMux()
+	noImg := postCountTokens(t, mux, `{
+		"model":"kimi-k2.6",
+		"messages":[{"role":"user","content":"hello"}]
+	}`)
+	withImg := postCountTokens(t, mux, `{
+		"model":"kimi-k2.6",
+		"messages":[{"role":"user","content":[
+			{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}
+		]}]
+	}`)
+	noImgN := decodeCountTokensOK(t, noImg)
+	withImgN := decodeCountTokensOK(t, withImg)
+	delta := withImgN - noImgN
+	// ImageOverheadTokens=85 for the image_url part. The
+	// withImg body has no string content while the noImg body
+	// has 2 tokens of text. The minimum acceptable delta is
+	// therefore 85 - 2 = 83; we assert 80 to leave a small
+	// margin for the URL text contribution and rounding.
+	if delta < 80 {
+		t.Errorf("OpenAI image_url overhead delta = %d, want >= 80 (image overhead=85, text delta up to 2)", delta)
+	}
+}
+
+func TestCountTokensOpenAIToolCallsWithoutToolsTopLevel(t *testing.T) {
+	mux := newCountTokensMux()
+	noCall := postCountTokens(t, mux, `{
+		"model":"kimi-k2.6",
+		"messages":[{"role":"user","content":"hello"}]
+	}`)
+	withCall := postCountTokens(t, mux, `{
+		"model":"kimi-k2.6",
+		"messages":[
+			{"role":"user","content":"hello"},
+			{"role":"assistant","content":null,"tool_calls":[
+				{"id":"call_1","type":"function","function":{
+					"name":"lookup","arguments":"{\"id\":42}"
+				}}
+			]}
+		]
+	}`)
+	noCallN := decodeCountTokensOK(t, noCall)
+	withCallN := decodeCountTokensOK(t, withCall)
+	if withCallN <= noCallN {
+		t.Errorf("OpenAI tool_calls did not increase estimate: %d vs %d",
+			withCallN, noCallN)
+	}
+}
+
+func TestCountTokensOpenAIToolCallIDRoutesToOpenAI(t *testing.T) {
+	mux := newCountTokensMux()
+	w := postCountTokens(t, mux, `{
+		"model":"kimi-k2.6",
+		"messages":[
+			{"role":"user","content":"hello"},
+			{"role":"tool","tool_call_id":"call_1","content":"42"}
+		]
+	}`)
+	got := decodeCountTokensOK(t, w)
+	// tool role + tool_call_id must not crash; we just want a
+	// non-zero estimate and a 200.
+	if got < 1 {
+		t.Errorf("estimate = %d, want >= 1", got)
+	}
+}
+
+func TestCountTokensPureTextMessageStillRoutesToAnthropicByDefault(t *testing.T) {
+	mux := newCountTokensMux()
+	// No image_url, no tool_calls, no system, no tools. This is
+	// the ambiguous case. The handler must still return a valid
+	// (non-zero) estimate; the dispatch falls through to
+	// Anthropic because looksLikeOpenAIChatMessages is false.
+	w := postCountTokens(t, mux, `{
+		"model":"minimax-m3",
+		"messages":[{"role":"user","content":"hello"}]
+	}`)
+	got := decodeCountTokensOK(t, w)
+	if got < 1 {
+		t.Errorf("estimate = %d, want >= 1", got)
+	}
+}
