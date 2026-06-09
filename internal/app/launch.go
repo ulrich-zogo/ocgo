@@ -97,14 +97,15 @@ func LaunchCmd() *cobra.Command {
 				return err
 			}
 			base := fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port)
-			if err := codex.EnsureConfig(base); err != nil {
+			mgr := codex.NewManager()
+			if err := mgr.EnsureCLIConfig(base); err != nil {
 				return fmt.Errorf("failed to configure codex: %w", err)
 			}
 			if codexConfigOnly {
 				fmt.Printf("Configured Codex profile %q in %s\n", config.CodexProfileName, config.CodexProfileConfigFile())
 				return nil
 			}
-			if err := codex.CheckVersion(); err != nil {
+			if err := mgr.CheckVersion(); err != nil {
 				return err
 			}
 			serverCmd, err := process.StartLaunchServer(base)

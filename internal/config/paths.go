@@ -25,3 +25,11 @@ func CodexModelCatalogFile() string {
 func ModelCatalogCacheFile() string {
 	return filepath.Join(ConfigDir(), "model-catalog-cache.json")
 }
+
+func CodexDesktopStateFile() string {
+	return filepath.Join(ConfigDir(), "codex-desktop-state.json")
+}
+
+func CodexBackupDir() string {
+	return filepath.Join(ConfigDir(), "codex-backups")
+}
