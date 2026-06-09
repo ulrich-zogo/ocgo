@@ -1093,6 +1093,9 @@ func UsageFromFields(fields map[string]any) TokenUsage {
 		u.OutputTokens = IntField(fields, "completion_tokens")
 	}
 	u.TotalTokens = IntField(fields, "total_tokens")
+	if u.TotalTokens == 0 && (u.InputTokens > 0 || u.OutputTokens > 0) {
+		u.TotalTokens = u.InputTokens + u.OutputTokens
+	}
 	u.CachedInputTokens = CachedTokens(fields)
 	u.Present = u.InputTokens > 0 || u.OutputTokens > 0 || u.TotalTokens > 0
 	return u
@@ -1132,7 +1135,31 @@ func CachedTokens(fields map[string]any) int {
 	if v := IntField(fields, "cached_tokens"); v > 0 {
 		return v
 	}
+	if v := IntFromAnyMapField(fields, "prompt_tokens_details", "cached_tokens"); v > 0 {
+		return v
+	}
+	if v := IntFromAnyMapField(fields, "input_tokens_details", "cached_tokens"); v > 0 {
+		return v
+	}
 	return 0
+}
+
+// IntFromAnyMapField drills one level into a nested map[string]any
+// and reads an integer field. It is used to pull
+// "prompt_tokens_details.cached_tokens" and
+// "input_tokens_details.cached_tokens" out of upstream usage
+// objects, both of which are common in OpenAI and Anthropic
+// responses.
+func IntFromAnyMapField(fields map[string]any, outer, inner string) int {
+	v, ok := fields[outer]
+	if !ok {
+		return 0
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return 0
+	}
+	return IntField(m, inner)
 }
 
 func AnthropicUsage(u TokenUsage) map[string]int {
@@ -1153,18 +1180,32 @@ func AnthropicDeltaUsage(u TokenUsage) map[string]int {
 }
 
 func ResponsesUsage(u TokenUsage) map[string]any {
-	return map[string]any{
+	total := u.TotalTokens
+	if total == 0 {
+		total = u.InputTokens + u.OutputTokens
+	}
+	m := map[string]any{
 		"input_tokens":  u.InputTokens,
 		"output_tokens": u.OutputTokens,
-		"total_tokens":  u.TotalTokens,
+		"total_tokens":  total,
 	}
+	if u.CachedInputTokens > 0 {
+		m["input_tokens_details"] = map[string]any{
+			"cached_tokens": u.CachedInputTokens,
+		}
+	}
+	return m
 }
 
 func OpenAIUsage(u TokenUsage) map[string]any {
+	total := u.TotalTokens
+	if total == 0 {
+		total = u.InputTokens + u.OutputTokens
+	}
 	m := map[string]any{
 		"prompt_tokens":     u.InputTokens,
 		"completion_tokens": u.OutputTokens,
-		"total_tokens":      u.TotalTokens,
+		"total_tokens":      total,
 	}
 	if u.CachedInputTokens > 0 {
 		m["prompt_tokens_details"] = map[string]any{
