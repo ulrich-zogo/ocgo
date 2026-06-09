@@ -37,3 +37,7 @@ func CodexBackupDir() string {
 func ModelSelectionFile() string {
 	return filepath.Join(ConfigDir(), "model-selection.json")
 }
+
+func DaemonStateFile() string {
+	return filepath.Join(ConfigDir(), "daemon-state.json")
+}
