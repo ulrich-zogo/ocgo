@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -947,6 +948,48 @@ func TestNewMuxRegistersV1ModelsRoute(t *testing.T) {
 	}
 	if !strings.Contains(countW.Body.String(), `"input_tokens"`) {
 		t.Fatalf("/v1/messages/count_tokens body missing input_tokens: %s", countW.Body.String())
+	}
+}
+
+func TestProxyModelsUsesCacheWhenOfficialAndRemoteFail(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	body := `{
+		"version": 1,
+		"source": "official",
+		"fetched_at": "2026-06-08T15:30:00Z",
+		"models": [
+			{"id":"minimax-m3","object":"model","created":1,"owned_by":"opencode"},
+			{"id":"kimi-k2.6","object":"model","created":2,"owned_by":"opencode"}
+		]
+	}`
+	if err := os.WriteFile(cachePath, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	models.ResetFetchersForTest()
+	models.SetFetchersForTest(nil, nil, errors.New("no official"), errors.New("no remote"))
+	restoreCache := models.SetCacheFileForTest(cachePath)
+	t.Cleanup(func() {
+		models.ResetFetchersForTest()
+		restoreCache()
+	})
+
+	mux := NewMux(config.Config{})
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("/v1/models status = %d, want 200", w.Code)
+	}
+	resp := decodeModelsList(t, w.Body.Bytes())
+	if resp.Object != "list" {
+		t.Fatalf("object = %q, want list", resp.Object)
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("data length = %d, want 2", len(resp.Data))
+	}
+	if resp.Data[0].ID != "minimax-m3" || resp.Data[1].ID != "kimi-k2.6" {
+		t.Fatalf("data = %+v, want cached order preserved", resp.Data)
 	}
 }
 
