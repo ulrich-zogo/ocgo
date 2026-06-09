@@ -9,6 +9,7 @@ import (
 	"ocgo/internal/codex"
 	"ocgo/internal/config"
 	"ocgo/internal/mapping"
+	"ocgo/internal/models"
 	"ocgo/internal/process"
 )
 
@@ -47,40 +48,14 @@ func LaunchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if model != "" {
-				c.Env = append(c.Env,
-					"ANTHROPIC_MODEL="+model,
-					"ANTHROPIC_SMALL_FAST_MODEL="+model,
-					"ANTHROPIC_CUSTOM_MODEL_OPTION="+model,
-					"ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="+model+" via OCGO",
-					"ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION=OpenCode Go model routed through OCGO",
-				)
+			modelEnv, hasEffective, err := BuildClaudeModelEnv(model)
+			if err != nil {
+				return err
+			}
+			if hasEffective {
+				c.Env = append(c.Env, modelEnv...)
 			} else {
-				opus := mapping.ResolveMappedModel("claude", "claude-opus", mappings)
-				sonnet := mapping.ResolveMappedModel("claude", "claude-sonnet", mappings)
-				haiku := mapping.ResolveMappedModel("claude", "claude-haiku", mappings)
-				if opus != "claude-opus" {
-					c.Env = append(c.Env,
-						"ANTHROPIC_DEFAULT_OPUS_MODEL="+opus,
-						"ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="+opus+" via OCGO",
-						"ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION=OpenCode Go model routed through OCGO",
-					)
-				}
-				if sonnet != "claude-sonnet" {
-					c.Env = append(c.Env,
-						"ANTHROPIC_DEFAULT_SONNET_MODEL="+sonnet,
-						"ANTHROPIC_DEFAULT_SONNET_MODEL_NAME="+sonnet+" via OCGO",
-						"ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION=OpenCode Go model routed through OCGO",
-					)
-				}
-				if haiku != "claude-haiku" {
-					c.Env = append(c.Env,
-						"ANTHROPIC_DEFAULT_HAIKU_MODEL="+haiku,
-						"ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="+haiku+" via OCGO",
-						"ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION=OpenCode Go model routed through OCGO",
-						"ANTHROPIC_SMALL_FAST_MODEL="+haiku,
-					)
-				}
+				c.Env = append(c.Env, BuildClaudeLegacyMappingEnv(mappings)...)
 			}
 			mapping.PrintLaunchMapping("claude", mappings["claude"])
 			return c.Run()
@@ -101,8 +76,13 @@ func LaunchCmd() *cobra.Command {
 			if err := mgr.EnsureCLIConfig(base); err != nil {
 				return fmt.Errorf("failed to configure codex: %w", err)
 			}
+			selectedModel, err := models.ResolveEffectiveModel(model)
+			if err != nil {
+				return err
+			}
 			if codexConfigOnly {
-				fmt.Printf("Configured Codex profile %q in %s\n", config.CodexProfileName, config.CodexProfileConfigFile())
+				fmt.Fprintf(cmd.OutOrStdout(), "Configured Codex profile %q in %s\n", config.CodexProfileName, config.CodexProfileConfigFile())
+				fmt.Fprintf(cmd.OutOrStdout(), "Effective OpenCode Go model: %s\n", selectedModel)
 				return nil
 			}
 			if err := mgr.CheckVersion(); err != nil {
@@ -115,11 +95,7 @@ func LaunchCmd() *cobra.Command {
 			if serverCmd != nil {
 				defer process.StopManagedServer(serverCmd)
 			}
-			codexArgs := []string{"--profile", config.CodexProfileName}
-			if model != "" {
-				codexArgs = append(codexArgs, "-m", model)
-			}
-			codexArgs = append(codexArgs, args...)
+			codexArgs := BuildCodexArgsWithResolvedModel(selectedModel, args)
 			bin, err := exec.LookPath("codex")
 			if err != nil {
 				return fmt.Errorf("codex not found in PATH; install with: npm install -g @openai/codex: %w", err)
