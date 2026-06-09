@@ -129,3 +129,60 @@ func EnsureServer(base string) error {
 		}
 	}
 }
+
+func BaseURL(cfg config.Config) string {
+	host := cfg.Host
+	if host == "" {
+		host = config.DefaultHost
+	}
+	port := cfg.Port
+	if port == 0 {
+		port = config.DefaultPort
+	}
+	return fmt.Sprintf("http://%s:%d", host, port)
+}
+
+func WaitHealthy(base string, timeout time.Duration) error {
+	if Healthy(base) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("server did not become healthy at %s within %s", base, timeout)
+		default:
+			if Healthy(base) {
+				return nil
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+}
+
+func StartBackgroundWithWait(base string, timeout time.Duration) (*exec.Cmd, error) {
+	if Healthy(base) {
+		return nil, nil
+	}
+	cmd, err := StartServerProcess(true)
+	if err != nil {
+		return nil, err
+	}
+	if err := WaitHealthy(base, timeout); err != nil {
+		return cmd, err
+	}
+	return cmd, nil
+}
+
+func KillPID(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid pid: %d", pid)
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return p.Kill()
+}
