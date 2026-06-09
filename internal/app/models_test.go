@@ -234,3 +234,41 @@ func TestBuildCodexArgsErrorsOnAllFetchersDown(t *testing.T) {
 		t.Fatalf("args[3] = %q, want minimax-m3 (first fallback)", args[3])
 	}
 }
+
+
+func TestBuildCodexArgsWithResolvedModel(t *testing.T) {
+	args := BuildCodexArgsWithResolvedModel("qwen3.7-max", []string{"--search", "off"})
+	want := []string{"--profile", "ocgo-launch", "-m", "qwen3.7-max", "--search", "off"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+func TestBuildCodexArgsWithResolvedModelNoExtras(t *testing.T) {
+	args := BuildCodexArgsWithResolvedModel("minimax-m3", nil)
+	if len(args) != 4 {
+		t.Fatalf("args = %v, want 4 entries", args)
+	}
+	want := []string{"--profile", "ocgo-launch", "-m", "minimax-m3"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+func TestBuildCodexArgsDelegatesToWithResolvedModel(t *testing.T) {
+	withTempSelectionFile(t)
+	models.ResetFetchersForTest()
+	models.SetFetchersForTest(nil, []models.OfficialModel{
+		{ID: "qwen3.7-max", Object: "model", Created: 1, OwnedBy: "opencode"},
+	}, nil, nil)
+	t.Cleanup(func() { models.ResetFetchersForTest() })
+
+	args, err := BuildCodexArgs("qwen3.7-max", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--profile", "ocgo-launch", "-m", "qwen3.7-max"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("BuildCodexArgs should delegate to BuildCodexArgsWithResolvedModel: got %v, want %v", args, want)
+	}
+}

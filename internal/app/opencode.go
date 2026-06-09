@@ -20,15 +20,9 @@ func OpencodeCmd() *cobra.Command {
 		Use:   "current",
 		Short: "Print the OpenCode Go model that will be used by launch",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			selected, err := models.GetDefaultModel()
-			configured := err == nil && selected != ""
-			if !configured {
-				// Fall back to the first known model.
-				known := models.KnownIDs()
-				if len(known) == 0 {
-					return fmt.Errorf("no known OpenCode Go models available")
-				}
-				selected = known[0]
+			selected, configured, err := models.GetDefaultModelStatus()
+			if err != nil {
+				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Default OpenCode Go model: %s\n", selected)
 			fmt.Fprintf(cmd.OutOrStdout(), "Source: %s\n", DescribeSelectionSource(configured))

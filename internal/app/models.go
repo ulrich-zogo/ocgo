@@ -17,9 +17,19 @@ func BuildCodexArgs(explicitModel string, extraArgs []string) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"--profile", config.CodexProfileName, "-m", selected}
-	args = append(args, extraArgs...)
-	return args, nil
+	return BuildCodexArgsWithResolvedModel(selected, extraArgs), nil
+}
+
+// BuildCodexArgsWithResolvedModel assumes the model has already been
+// resolved (typically by models.ResolveEffectiveModel) and returns
+// the argv passed to the real `codex` binary.
+//
+// Use this when the caller needs the resolved model for other
+// purposes (e.g. printing "Effective OpenCode Go model: ..." in
+// `--config` mode) and does not want to re-resolve.
+func BuildCodexArgsWithResolvedModel(selectedModel string, extraArgs []string) []string {
+	args := []string{"--profile", config.CodexProfileName, "-m", selectedModel}
+	return append(args, extraArgs...)
 }
 
 // BuildClaudeModelEnv returns the slice of environment variables

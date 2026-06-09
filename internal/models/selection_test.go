@@ -280,3 +280,57 @@ func TestResolveEffectiveModelFallsBackToStaticFallback(t *testing.T) {
 		t.Fatalf("ResolveEffectiveModel(\"\") = %q, want minimax-m3 (first fallback)", got)
 	}
 }
+
+
+func TestGetDefaultModelStatusWithConfiguredDefault(t *testing.T) {
+	withSelectionFile(t)
+	withModelFetchers(t, nil, officialFromIDs("minimax-m3", "qwen3.7-max"), nil)
+	if err := SetDefaultModel("qwen3.7-max"); err != nil {
+		t.Fatal(err)
+	}
+	id, configured, err := GetDefaultModelStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "qwen3.7-max" {
+		t.Fatalf("model = %q, want qwen3.7-max", id)
+	}
+	if !configured {
+		t.Fatal("configured = false, want true")
+	}
+}
+
+func TestGetDefaultModelStatusFallsBackToFirstKnown(t *testing.T) {
+	withSelectionFile(t)
+	withModelFetchers(t, nil, officialFromIDs("minimax-m3", "kimi-k2.6"), nil)
+	id, configured, err := GetDefaultModelStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "minimax-m3" {
+		t.Fatalf("model = %q, want minimax-m3 (first known)", id)
+	}
+	if configured {
+		t.Fatal("configured = true, want false (no selection file)")
+	}
+}
+
+func TestGetDefaultModelStatusFallsBackToStaticList(t *testing.T) {
+	withSelectionFile(t)
+	ResetFetchersForTest()
+	SetFetchersForTest(nil, nil, errors.New("no oficial"), errors.New("no remote"))
+	restoreCache := SetCacheFileForTest(filepath.Join(t.TempDir(), "model-catalog-cache.json"))
+	defer restoreCache()
+	id, configured, err := GetDefaultModelStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// With no oficial, no remote, and no cache, the 18-model
+	// fallback list is used; first entry is minimax-m3.
+	if id != "minimax-m3" {
+		t.Fatalf("model = %q, want minimax-m3 (first fallback)", id)
+	}
+	if configured {
+		t.Fatal("configured = true, want false (no selection file)")
+	}
+}

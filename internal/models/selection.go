@@ -74,6 +74,23 @@ func GetDefaultModel() (string, error) {
 	return id, nil
 }
 
+// GetDefaultModelStatus returns the model that would be used when no
+// explicit model is provided. Unlike GetDefaultModel, it does not
+// error when the configured default is missing or invalid: in that
+// case it falls back to the first known OpenCode Go model and reports
+// configured=false. It only returns an error if no known models are
+// available at all (official + remote + cache + fallback all empty).
+func GetDefaultModelStatus() (model string, configured bool, err error) {
+	if id, err := GetDefaultModel(); err == nil && id != "" {
+		return id, true, nil
+	}
+	known := KnownIDs()
+	if len(known) == 0 {
+		return "", false, fmt.Errorf("no known OpenCode Go models available")
+	}
+	return known[0], false, nil
+}
+
 func SetDefaultModel(model string) error {
 	id := NormalizeID(strings.TrimSpace(model))
 	if id == "" {

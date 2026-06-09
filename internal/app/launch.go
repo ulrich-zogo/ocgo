@@ -9,6 +9,7 @@ import (
 	"ocgo/internal/codex"
 	"ocgo/internal/config"
 	"ocgo/internal/mapping"
+	"ocgo/internal/models"
 	"ocgo/internal/process"
 )
 
@@ -75,8 +76,13 @@ func LaunchCmd() *cobra.Command {
 			if err := mgr.EnsureCLIConfig(base); err != nil {
 				return fmt.Errorf("failed to configure codex: %w", err)
 			}
+			selectedModel, err := models.ResolveEffectiveModel(model)
+			if err != nil {
+				return err
+			}
 			if codexConfigOnly {
-				fmt.Printf("Configured Codex profile %q in %s\n", config.CodexProfileName, config.CodexProfileConfigFile())
+				fmt.Fprintf(cmd.OutOrStdout(), "Configured Codex profile %q in %s\n", config.CodexProfileName, config.CodexProfileConfigFile())
+				fmt.Fprintf(cmd.OutOrStdout(), "Effective OpenCode Go model: %s\n", selectedModel)
 				return nil
 			}
 			if err := mgr.CheckVersion(); err != nil {
@@ -89,10 +95,7 @@ func LaunchCmd() *cobra.Command {
 			if serverCmd != nil {
 				defer process.StopManagedServer(serverCmd)
 			}
-			codexArgs, err := BuildCodexArgs(model, args)
-			if err != nil {
-				return err
-			}
+			codexArgs := BuildCodexArgsWithResolvedModel(selectedModel, args)
 			bin, err := exec.LookPath("codex")
 			if err != nil {
 				return fmt.Errorf("codex not found in PATH; install with: npm install -g @openai/codex: %w", err)
