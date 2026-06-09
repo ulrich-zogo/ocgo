@@ -109,11 +109,78 @@ func TestDaemonStartWhenAlreadyHealthy(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "OCGO daemon started") {
-		t.Fatalf("output missing 'OCGO daemon started':\n%s", got)
+	if !strings.Contains(got, "OCGO daemon already running") {
+		t.Fatalf("output missing 'OCGO daemon already running':\n%s", got)
+	}
+	if strings.Contains(got, "OCGO daemon started\n") || strings.HasPrefix(got, "OCGO daemon started") {
+		t.Fatalf("output should not say 'OCGO daemon started' when already running:\n%s", got)
 	}
 	if stub.startCalls.Load() != 0 {
 		t.Errorf("Start should not spawn a new background when already healthy; got %d calls", stub.startCalls.Load())
+	}
+}
+
+func TestDaemonStatusHealthyWithStateMissing(t *testing.T) {
+	setupDaemonTestHome(t)
+	stub := &daemonStub{}
+	stub.healthy.Store(true)
+	stub.install(t)
+
+	dir := t.TempDir()
+	t.Setenv("OCGO_DAEMON_STATE_FILE", filepath.Join(dir, "missing-daemon-state.json"))
+
+	root := NewRootCommand("test")
+	root.SetArgs([]string{"daemon", "status"})
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "OCGO proxy is running, but daemon state is missing") {
+		t.Fatalf("output missing 'OCGO proxy is running, but daemon state is missing':\n%s", got)
+	}
+	if strings.Contains(got, "OCGO daemon is running\n") || strings.HasPrefix(got, "OCGO daemon is running") {
+		t.Fatalf("output should not say 'OCGO daemon is running' when state missing:\n%s", got)
+	}
+}
+
+func TestDaemonStatusUnhealthyWithStaleState(t *testing.T) {
+	setupDaemonTestHome(t)
+	stub := &daemonStub{}
+	stub.healthy.Store(false)
+	stub.install(t)
+
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "daemon-state.json")
+	if err := daemon.WriteState(statePath, daemon.State{
+		Version:   daemon.StateVersion,
+		PID:       9999,
+		Host:      "127.0.0.1",
+		Port:      3456,
+		BaseURL:   "http://127.0.0.1:3456",
+		StartedAt: time.Now().UTC(),
+		Mode:      daemon.ModeDaemon,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OCGO_DAEMON_STATE_FILE", statePath)
+
+	root := NewRootCommand("test")
+	root.SetArgs([]string{"daemon", "status"})
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "OCGO daemon is not running") {
+		t.Fatalf("output should report 'not running' when /health fails even with stale state:\n%s", got)
+	}
+	if strings.Contains(got, "OCGO daemon is running\n") || strings.HasPrefix(got, "OCGO daemon is running") {
+		t.Fatalf("output should not say 'OCGO daemon is running' when /health fails:\n%s", got)
 	}
 }
 

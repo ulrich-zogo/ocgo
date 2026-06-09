@@ -28,12 +28,16 @@ func daemonStartCmd() *cobra.Command {
 				return err
 			}
 			mgr := daemon.NewManager()
-			st, err := mgr.Start(cfg)
+			st, alreadyRunning, err := mgr.Start(cfg)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintln(out, "OCGO daemon started")
+			if alreadyRunning {
+				fmt.Fprintln(out, "OCGO daemon already running")
+			} else {
+				fmt.Fprintln(out, "OCGO daemon started")
+			}
 			fmt.Fprintf(out, "Base URL: %s\n", st.BaseURL)
 			if st.PID > 0 {
 				fmt.Fprintf(out, "PID: %d\n", st.PID)
@@ -64,7 +68,7 @@ func daemonStatusCmd() *cobra.Command {
 				fmt.Fprintf(out, "Base URL: %s\n", s.BaseURL)
 				return nil
 			}
-			if s.Source == daemon.SourceHealthOnly {
+			if !s.HasState {
 				fmt.Fprintln(out, "OCGO proxy is running, but daemon state is missing")
 				fmt.Fprintf(out, "Base URL: %s\n", s.BaseURL)
 				if s.PID > 0 {
@@ -121,7 +125,7 @@ func daemonRestartCmd() *cobra.Command {
 			if err := mgr.Stop(cfg); err != nil && !errors.Is(err, daemon.ErrNotRunning) {
 				return err
 			}
-			st, err := mgr.Start(cfg)
+			st, _, err := mgr.Start(cfg)
 			if err != nil {
 				return err
 			}

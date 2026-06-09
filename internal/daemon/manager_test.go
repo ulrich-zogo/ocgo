@@ -69,12 +69,15 @@ func TestManagerStartAlreadyHealthy(t *testing.T) {
 	mgr := Manager{StateFile: filepath.Join(dir, "daemon-state.json"), WaitTimeout: 100 * time.Millisecond}
 	cfg := config.Config{Host: "127.0.0.1", Port: 3456, APIKey: "test-key"}
 
-	st, err := mgr.Start(cfg)
+	st, alreadyRunning, err := mgr.Start(cfg)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if stub.startCalls.Load() != 0 {
 		t.Errorf("StartBackground should not be called when already healthy; got %d calls", stub.startCalls.Load())
+	}
+	if !alreadyRunning {
+		t.Errorf("alreadyRunning = false, want true when /health is OK")
 	}
 	if st.PID != 123 {
 		t.Errorf("PID = %d, want 123", st.PID)
@@ -109,12 +112,15 @@ func TestManagerStartUnhealthyThenHealthy(t *testing.T) {
 	mgr := Manager{StateFile: filepath.Join(dir, "daemon-state.json"), WaitTimeout: 2 * time.Second}
 	cfg := config.Config{Host: "127.0.0.1", Port: 3456, APIKey: "test-key"}
 
-	st, err := mgr.Start(cfg)
+	st, alreadyRunning, err := mgr.Start(cfg)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if stub.startCalls.Load() != 1 {
 		t.Errorf("StartBackground should be called once; got %d", stub.startCalls.Load())
+	}
+	if alreadyRunning {
+		t.Errorf("alreadyRunning = true, want false when starting fresh")
 	}
 	if st.PID != 777 {
 		t.Errorf("PID = %d, want 777 (from listener stub)", st.PID)
@@ -134,9 +140,12 @@ func TestManagerStartStartBackgroundFails(t *testing.T) {
 	mgr := Manager{StateFile: filepath.Join(dir, "daemon-state.json"), WaitTimeout: 100 * time.Millisecond}
 	cfg := config.Config{Host: "127.0.0.1", Port: 3456, APIKey: "test-key"}
 
-	_, err := mgr.Start(cfg)
+	_, alreadyRunning, err := mgr.Start(cfg)
 	if err == nil {
 		t.Fatal("expected error when StartBackground fails")
+	}
+	if alreadyRunning {
+		t.Errorf("alreadyRunning = true, want false on failure")
 	}
 	if !strings.Contains(err.Error(), "start background server") {
 		t.Errorf("error should mention start background: %v", err)
@@ -153,9 +162,12 @@ func TestManagerStartHealthTimeout(t *testing.T) {
 	mgr := Manager{StateFile: filepath.Join(dir, "daemon-state.json"), WaitTimeout: 200 * time.Millisecond}
 	cfg := config.Config{Host: "127.0.0.1", Port: 3456, APIKey: "test-key"}
 
-	_, err := mgr.Start(cfg)
+	_, alreadyRunning, err := mgr.Start(cfg)
 	if err == nil {
 		t.Fatal("expected error when health never OK")
+	}
+	if alreadyRunning {
+		t.Errorf("alreadyRunning = true, want false on health timeout")
 	}
 }
 
@@ -227,12 +239,15 @@ func TestManagerRestart(t *testing.T) {
 	mgr := Manager{StateFile: filepath.Join(dir, "daemon-state.json"), WaitTimeout: 2 * time.Second}
 	cfg := config.Config{Host: "127.0.0.1", Port: 3456, APIKey: "test-key"}
 
-	st, err := mgr.Restart(cfg)
+	st, alreadyRunning, err := mgr.Restart(cfg)
 	if err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 	if stub.startCalls.Load() != 1 {
 		t.Errorf("Start should be called once during Restart; got %d", stub.startCalls.Load())
+	}
+	if alreadyRunning {
+		t.Errorf("alreadyRunning = true, want false after Restart")
 	}
 	if st.PID != 42 {
 		t.Errorf("PID = %d, want 42", st.PID)
@@ -250,7 +265,7 @@ func TestManagerRestartWhenNotRunning(t *testing.T) {
 	mgr := Manager{StateFile: filepath.Join(dir, "daemon-state.json"), WaitTimeout: 2 * time.Second}
 	cfg := config.Config{Host: "127.0.0.1", Port: 3456, APIKey: "test-key"}
 
-	st, err := mgr.Restart(cfg)
+	st, _, err := mgr.Restart(cfg)
 	if err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
@@ -287,6 +302,9 @@ func TestManagerStatusHealthyWithState(t *testing.T) {
 	if !s.Healthy {
 		t.Errorf("Healthy = false, want true")
 	}
+	if !s.HasState {
+		t.Errorf("HasState = false, want true (state file present)")
+	}
 	if s.PID != 100 {
 		t.Errorf("PID = %d, want 100", s.PID)
 	}
@@ -312,6 +330,9 @@ func TestManagerStatusHealthyFromListenerNoState(t *testing.T) {
 	if !s.Running {
 		t.Errorf("Running = false, want true")
 	}
+	if s.HasState {
+		t.Errorf("HasState = true, want false (state file missing)")
+	}
 	if s.PID != 222 {
 		t.Errorf("PID = %d, want 222", s.PID)
 	}
@@ -335,6 +356,9 @@ func TestManagerStatusHealthyOnlyNoStateNoListener(t *testing.T) {
 	}
 	if !s.Running {
 		t.Errorf("Running = false, want true (healthy)")
+	}
+	if s.HasState {
+		t.Errorf("HasState = true, want false (state file missing)")
 	}
 	if s.Source != SourceHealthOnly {
 		t.Errorf("Source = %q, want %q", s.Source, SourceHealthOnly)
@@ -362,6 +386,38 @@ func TestManagerStatusNotRunning(t *testing.T) {
 	}
 }
 
+func TestManagerStatusUnhealthyWithStaleState(t *testing.T) {
+	stub := newStubRuntime()
+	stub.healthy.Store(false)
+	stub.install(t)
+	dir := redirectHome(t)
+
+	statePath := filepath.Join(dir, "daemon-state.json")
+	if err := WriteState(statePath, State{Version: StateVersion, PID: 9999, Host: "127.0.0.1", Port: 3456, BaseURL: "http://127.0.0.1:3456", StartedAt: time.Now().UTC(), Mode: ModeDaemon}); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := Manager{StateFile: statePath, WaitTimeout: 100 * time.Millisecond}
+	cfg := config.Config{Host: "127.0.0.1", Port: 3456, APIKey: "test-key"}
+
+	s, err := mgr.Status(cfg)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("state file missing before Status: %v", err)
+	}
+	if s.Running {
+		t.Errorf("Running = true, want false (health is down even with stale state PID)")
+	}
+	if !s.HasState {
+		t.Errorf("HasState = false, want true (state file IS on disk; just stale); stateErr=%v", err)
+	}
+	if s.Source != SourceNone {
+		t.Errorf("Source = %q, want %q when not running", s.Source, SourceNone)
+	}
+}
+
 func TestManagerStatusFromPIDFile(t *testing.T) {
 	stub := newStubRuntime()
 	stub.healthy.Store(true)
@@ -378,6 +434,9 @@ func TestManagerStatusFromPIDFile(t *testing.T) {
 	}
 	if s.PID != 333 {
 		t.Errorf("PID = %d, want 333", s.PID)
+	}
+	if s.HasState {
+		t.Errorf("HasState = true, want false (state file missing, only pid-file present)")
 	}
 	if s.Source != SourcePIDFile {
 		t.Errorf("Source = %q, want %q", s.Source, SourcePIDFile)

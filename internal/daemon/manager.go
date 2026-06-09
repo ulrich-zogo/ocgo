@@ -11,12 +11,13 @@ import (
 )
 
 type Status struct {
-	Running bool
-	Healthy bool
-	PID     int
-	State   State
-	BaseURL string
-	Source  string
+	Running  bool
+	Healthy  bool
+	PID      int
+	State    State
+	HasState bool
+	BaseURL  string
+	Source   string
 }
 
 const (
@@ -46,7 +47,7 @@ func DaemonStateFile() string {
 	return config.DaemonStateFile()
 }
 
-func (m Manager) Start(cfg config.Config) (State, error) {
+func (m Manager) Start(cfg config.Config) (State, bool, error) {
 	base := process.BaseURL(cfg)
 	if healthyFn(base) {
 		pid, _ := m.discoverPID(cfg)
@@ -63,16 +64,16 @@ func (m Manager) Start(cfg config.Config) (State, error) {
 			Mode:      ModeDaemon,
 		}
 		if err := WriteState(m.StateFile, st); err != nil {
-			return st, err
+			return st, true, err
 		}
-		return st, nil
+		return st, true, nil
 	}
 
 	if err := startBackgroundFn(); err != nil {
-		return State{}, fmt.Errorf("start background server: %w", err)
+		return State{}, false, fmt.Errorf("start background server: %w", err)
 	}
 	if err := waitHealthyFn(base, m.WaitTimeout); err != nil {
-		return State{}, err
+		return State{}, false, err
 	}
 
 	pid := 0
@@ -95,9 +96,9 @@ func (m Manager) Start(cfg config.Config) (State, error) {
 		Mode:      ModeDaemon,
 	}
 	if err := WriteState(m.StateFile, st); err != nil {
-		return st, err
+		return st, false, err
 	}
-	return st, nil
+	return st, false, nil
 }
 
 func (m Manager) Stop(cfg config.Config) error {
@@ -121,9 +122,9 @@ func (m Manager) Stop(cfg config.Config) error {
 	return nil
 }
 
-func (m Manager) Restart(cfg config.Config) (State, error) {
+func (m Manager) Restart(cfg config.Config) (State, bool, error) {
 	if err := m.Stop(cfg); err != nil && !errors.Is(err, ErrNotRunning) {
-		return State{}, err
+		return State{}, false, err
 	}
 	return m.Start(cfg)
 }
@@ -132,17 +133,20 @@ func (m Manager) Status(cfg config.Config) (Status, error) {
 	base := process.BaseURL(cfg)
 	healthy := healthyFn(base)
 	st, stateErr := ReadState(m.StateFile)
+	hasState := stateErr == nil
 
 	pid, source := m.resolvePID(cfg, st, stateErr, healthy)
 
-	running := healthy || pid > 0
+	running := healthy
+
 	st2 := Status{
-		Running: running,
-		Healthy: healthy,
-		PID:     pid,
-		State:   st,
-		BaseURL: base,
-		Source:  source,
+		Running:  running,
+		Healthy:  healthy,
+		PID:      pid,
+		State:    st,
+		HasState: hasState,
+		BaseURL:  base,
+		Source:   source,
 	}
 	if !running {
 		st2.Source = SourceNone
