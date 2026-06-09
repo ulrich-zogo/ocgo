@@ -21,3 +21,7 @@ func CodexModelCatalogFile() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".codex", "ocgo-models.json")
 }
+
+func ModelCatalogCacheFile() string {
+	return filepath.Join(ConfigDir(), "model-catalog-cache.json")
+}

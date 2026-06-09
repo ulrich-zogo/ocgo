@@ -93,9 +93,17 @@ func (f *lazyFetcher[T]) refresh() {
 	f.fetched = true
 }
 
+func (f *lazyFetcher[T]) set(data T, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.data = data
+	f.err = err
+	f.fetched = true
+}
+
 var (
 	remoteModels   = newLazyFetcher(fetchRemoteModels)
-	officialModels = newLazyFetcher(fetchOfficialModels)
+	officialModels = newLazyFetcher(fetchOfficialModelsAndCache)
 
 	fallbackModelIDs = []string{
 		"minimax-m3",
@@ -170,40 +178,25 @@ func fetchOfficialModels() ([]OfficialModel, error) {
 	return parseOfficialModelsBody(body)
 }
 
+var fetchOfficialModelsFunc = fetchOfficialModels
+
+func fetchOfficialModelsAndCache() ([]OfficialModel, error) {
+	models, err := fetchOfficialModelsFunc()
+	if err != nil {
+		return nil, err
+	}
+	if len(models) > 0 {
+		_ = WriteCatalogCache(CatalogCacheFile(), models, sourceOfficial, time.Now().UTC())
+	}
+	return models, nil
+}
+
 func parseOfficialModelsBody(body []byte) ([]OfficialModel, error) {
 	var apiResp officialModelsResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("unmarshal official models: %w", err)
 	}
-
-	out := make([]OfficialModel, 0, len(apiResp.Data))
-	seen := make(map[string]struct{}, len(apiResp.Data))
-	for _, m := range apiResp.Data {
-		id := NormalizeID(m.ID)
-		if strings.TrimSpace(id) == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-
-		obj := m.Object
-		if obj == "" {
-			obj = officialObject
-		}
-		ownedBy := m.OwnedBy
-		if ownedBy == "" {
-			ownedBy = officialOwnedBy
-		}
-		out = append(out, OfficialModel{
-			ID:      id,
-			Object:  obj,
-			Created: m.Created,
-			OwnedBy: ownedBy,
-		})
-	}
-	return out, nil
+	return normalizeOfficialModels(apiResp.Data), nil
 }
 
 func getRemoteModels() (map[string]remoteModelInfo, error) {
@@ -242,33 +235,50 @@ func OfficialModelIDs() ([]string, error) {
 	return ids, nil
 }
 
-func KnownModels() []OfficialModel {
+func KnownModelsWithSource() ([]OfficialModel, string) {
 	if models, err := getOfficialModels(); err == nil && len(models) > 0 {
 		out := make([]OfficialModel, len(models))
 		copy(out, models)
-		return out
+		return out, sourceOfficial
+	}
+
+	if cached, err := ReadCatalogCache(CatalogCacheFile()); err == nil && len(cached) > 0 {
+		return cached, sourceCache
 	}
 
 	if remote, err := getRemoteModels(); err == nil && len(remote) > 0 {
-		ids := make([]string, 0, len(remote))
-		for id := range remote {
-			if strings.TrimSpace(id) != "" {
-				ids = append(ids, id)
-			}
-		}
-		sort.Strings(ids)
-		out := make([]OfficialModel, len(ids))
-		for i, id := range ids {
-			out[i] = OfficialModel{
-				ID:      id,
-				Object:  officialObject,
-				Created: 0,
-				OwnedBy: officialOwnedBy,
-			}
-		}
-		return out
+		return remoteModelsToOfficialModels(remote), sourceRemote
 	}
 
+	return fallbackModelsToOfficialModels(), sourceFallback
+}
+
+func KnownModels() []OfficialModel {
+	models, _ := KnownModelsWithSource()
+	return models
+}
+
+func remoteModelsToOfficialModels(remote map[string]remoteModelInfo) []OfficialModel {
+	ids := make([]string, 0, len(remote))
+	for id := range remote {
+		if strings.TrimSpace(id) != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	out := make([]OfficialModel, len(ids))
+	for i, id := range ids {
+		out[i] = OfficialModel{
+			ID:      id,
+			Object:  officialObject,
+			Created: 0,
+			OwnedBy: officialOwnedBy,
+		}
+	}
+	return out
+}
+
+func fallbackModelsToOfficialModels() []OfficialModel {
 	out := make([]OfficialModel, len(fallbackModelIDs))
 	for i, id := range fallbackModelIDs {
 		out[i] = OfficialModel{
@@ -309,9 +319,19 @@ func RefreshAll() {
 	}()
 	go func() {
 		defer wg.Done()
-		officialModels.refresh()
+		_ = RefreshOfficialModels()
 	}()
 	wg.Wait()
+}
+
+func RefreshOfficialModels() error {
+	models, err := fetchOfficialModelsAndCache()
+	if err != nil {
+		officialModels.set(nil, err)
+		return err
+	}
+	officialModels.set(models, nil)
+	return nil
 }
 
 type ModelMetadata struct {

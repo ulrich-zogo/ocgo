@@ -1,10 +1,14 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func withModelFetchers(t *testing.T, remote map[string]remoteModelInfo, official []OfficialModel, officialErr error) {
@@ -26,9 +30,11 @@ func withModelFetchers(t *testing.T, remote map[string]remoteModelInfo, official
 		}
 		return official, nil
 	})
+	restoreCache := SetCacheFileForTest(filepath.Join(t.TempDir(), "model-catalog-cache.json"))
 	t.Cleanup(func() {
 		remoteModels = oldRemoteModels
 		officialModels = oldOfficialModels
+		restoreCache()
 	})
 }
 
@@ -504,4 +510,435 @@ func TestKnownIDsFallbackOrderIsStable(t *testing.T) {
 		t.Fatal("fallback should NOT be sorted, order must be preserved as defined")
 	}
 	_ = sortedCopy
+}
+
+func TestWriteCatalogCacheRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	when := time.Date(2026, 6, 8, 15, 30, 0, 0, time.UTC)
+	in := []OfficialModel{
+		{ID: "minimax-m3", Object: "model", Created: 1780792361, OwnedBy: "opencode"},
+	}
+	if err := WriteCatalogCache(path, in, sourceOfficial, when); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cache CatalogCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cache.Version != catalogCacheVersion {
+		t.Fatalf("version = %d, want %d", cache.Version, catalogCacheVersion)
+	}
+	if cache.Source != sourceOfficial {
+		t.Fatalf("source = %q, want %q", cache.Source, sourceOfficial)
+	}
+	if !cache.FetchedAt.Equal(when) {
+		t.Fatalf("fetched_at = %v, want %v", cache.FetchedAt, when)
+	}
+	if len(cache.Models) != 1 || cache.Models[0].ID != "minimax-m3" {
+		t.Fatalf("models = %+v", cache.Models)
+	}
+	if cache.Models[0].Created != 1780792361 {
+		t.Fatalf("created = %d, want 1780792361", cache.Models[0].Created)
+	}
+}
+
+func TestReadCatalogCachePreservesOrderAndFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	body := `{
+		"version": 1,
+		"source": "official",
+		"fetched_at": "2026-06-08T15:30:00Z",
+		"models": [
+			{"id":"minimax-m3","object":"model","created":1780792361,"owned_by":"opencode"},
+			{"id":"kimi-k2.6","object":"model","created":1780792361,"owned_by":"opencode"}
+		]
+	}`
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadCatalogCache(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].ID != "minimax-m3" || got[1].ID != "kimi-k2.6" {
+		t.Fatalf("order = %+v", got)
+	}
+	if got[0].Created != 1780792361 || got[0].OwnedBy != "opencode" {
+		t.Fatalf("got[0] = %+v", got[0])
+	}
+}
+
+func TestReadCatalogCacheReturnsErrorWhenAbsent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.json")
+	if _, err := ReadCatalogCache(path); err == nil {
+		t.Fatal("expected error for missing cache file")
+	}
+}
+
+func TestReadCatalogCacheReturnsErrorForCorruptedJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	if err := os.WriteFile(path, []byte("{not-json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadCatalogCache(path); err == nil {
+		t.Fatal("expected error for corrupted cache")
+	}
+}
+
+func TestReadCatalogCacheIgnoresIncompatibleVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	body := `{"version":999,"source":"official","fetched_at":"2026-06-08T15:30:00Z","models":[{"id":"minimax-m3"}]}`
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadCatalogCache(path); err == nil {
+		t.Fatal("expected error for incompatible version")
+	}
+}
+
+func TestReadCatalogCacheIgnoresEmptyModels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	body := `{"version":1,"source":"official","fetched_at":"2026-06-08T15:30:00Z","models":[]}`
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadCatalogCache(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("len = %d, want 0 (empty cache returns empty slice, not used)", len(got))
+	}
+}
+
+func TestReadCatalogCacheNormalizesAndDedups(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	body := `{
+		"version": 1,
+		"source": "official",
+		"fetched_at": "2026-06-08T15:30:00Z",
+		"models": [
+			{"id":"opencode-go/minimax-m3"},
+			{"id":"minimax-m3"},
+			{"id":" "},
+			{"id":"kimi-k2.6","owned_by":""}
+		]
+	}`
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadCatalogCache(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 (full=%+v)", len(got), got)
+	}
+	if got[0].ID != "minimax-m3" || got[1].ID != "kimi-k2.6" {
+		t.Fatalf("order = %+v", got)
+	}
+	for _, m := range got {
+		if m.Object != "model" {
+			t.Fatalf("%s object = %q, want model", m.ID, m.Object)
+		}
+		if m.OwnedBy != "opencode" {
+			t.Fatalf("%s owned_by = %q, want opencode", m.ID, m.OwnedBy)
+		}
+	}
+}
+
+func TestKnownModelsWithSourceReturnsOfficialAndWritesCache(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	oldRemoteModels := remoteModels
+	restoreOfficial := SetOfficialFetcherForTest(func() ([]OfficialModel, error) {
+		return []OfficialModel{
+			{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
+		}, nil
+	})
+	remoteModels = newLazyFetcher(func() (map[string]remoteModelInfo, error) {
+		return nil, errors.New("no remote")
+	})
+	restoreCache := SetCacheFileForTest(cachePath)
+	t.Cleanup(func() {
+		remoteModels = oldRemoteModels
+		restoreOfficial()
+		restoreCache()
+	})
+
+	models, source := KnownModelsWithSource()
+	if source != sourceOfficial {
+		t.Fatalf("source = %q, want %q", source, sourceOfficial)
+	}
+	if len(models) != 1 || models[0].ID != "minimax-m3" || models[0].Created != 1 {
+		t.Fatalf("models = %+v", models)
+	}
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("cache file should exist after official success: %v", err)
+	}
+	var cache CatalogCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		t.Fatal(err)
+	}
+	if len(cache.Models) != 1 || cache.Models[0].ID != "minimax-m3" || cache.Models[0].Created != 1 {
+		t.Fatalf("cache models = %+v", cache.Models)
+	}
+	if cache.Source != sourceOfficial {
+		t.Fatalf("cache source = %q, want %q", cache.Source, sourceOfficial)
+	}
+}
+
+func TestKnownModelsWithSourceUsesCacheWhenOfficialFails(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	body := `{
+		"version": 1,
+		"source": "official",
+		"fetched_at": "2026-06-08T15:30:00Z",
+		"models": [
+			{"id":"minimax-m3","object":"model","created":1,"owned_by":"opencode"},
+			{"id":"kimi-k2.6","object":"model","created":2,"owned_by":"opencode"}
+		]
+	}`
+	if err := os.WriteFile(cachePath, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	oldRemoteModels := remoteModels
+	oldOfficialModels := officialModels
+	remoteModels = newLazyFetcher(func() (map[string]remoteModelInfo, error) {
+		return map[string]remoteModelInfo{"remote-a": {}}, nil
+	})
+	officialModels = newLazyFetcher(func() ([]OfficialModel, error) {
+		return nil, errors.New("no official")
+	})
+	restoreCache := SetCacheFileForTest(cachePath)
+	t.Cleanup(func() {
+		remoteModels = oldRemoteModels
+		officialModels = oldOfficialModels
+		restoreCache()
+	})
+
+	got, source := KnownModelsWithSource()
+	if source != sourceCache {
+		t.Fatalf("source = %q, want %q", source, sourceCache)
+	}
+	if len(got) != 2 || got[0].ID != "minimax-m3" || got[1].ID != "kimi-k2.6" {
+		t.Fatalf("got = %+v, want cached order preserved", got)
+	}
+}
+
+func TestKnownModelsWithSourceUsesRemoteWhenOfficialFailsAndCacheAbsent(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	restoreCache := SetCacheFileForTest(cachePath)
+	t.Cleanup(restoreCache)
+	withModelFetchers(t, map[string]remoteModelInfo{"remote-b": {}, "remote-a": {}}, nil, errors.New("no official"))
+	got, source := KnownModelsWithSource()
+	if source != sourceRemote {
+		t.Fatalf("source = %q, want %q", source, sourceRemote)
+	}
+	if len(got) != 2 || got[0].ID != "remote-a" || got[1].ID != "remote-b" {
+		t.Fatalf("got = %+v, want remote sorted", got)
+	}
+}
+
+func TestKnownModelsWithSourceFallsBackWhenAllFail(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	restoreCache := SetCacheFileForTest(cachePath)
+	t.Cleanup(restoreCache)
+	withModelFetchers(t, nil, nil, errors.New("no official"))
+	got, source := KnownModelsWithSource()
+	if source != sourceFallback {
+		t.Fatalf("source = %q, want %q", source, sourceFallback)
+	}
+	if len(got) != 18 {
+		t.Fatalf("len = %d, want 18", len(got))
+	}
+	if got[0].ID != "minimax-m3" {
+		t.Fatalf("got[0].ID = %q, want minimax-m3", got[0].ID)
+	}
+	found := false
+	for _, m := range got {
+		if m.ID == "hy3-preview" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("hy3-preview missing in fallback")
+	}
+}
+
+func TestKnownModelsWithSourceIgnoresCorruptedCache(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	if err := os.WriteFile(cachePath, []byte("{not-json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	restoreCache := SetCacheFileForTest(cachePath)
+	t.Cleanup(restoreCache)
+	withModelFetchers(t, map[string]remoteModelInfo{"remote-a": {}}, nil, errors.New("no official"))
+	got, source := KnownModelsWithSource()
+	if source != sourceRemote {
+		t.Fatalf("source = %q, want %q (corrupted cache must be ignored)", source, sourceRemote)
+	}
+	if len(got) != 1 || got[0].ID != "remote-a" {
+		t.Fatalf("got = %+v, want remote-a", got)
+	}
+}
+
+func TestKnownModelsWithSourceIgnoresEmptyCache(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	body := `{"version":1,"source":"official","fetched_at":"2026-06-08T15:30:00Z","models":[]}`
+	if err := os.WriteFile(cachePath, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	restoreCache := SetCacheFileForTest(cachePath)
+	t.Cleanup(restoreCache)
+	withModelFetchers(t, map[string]remoteModelInfo{"remote-a": {}}, nil, errors.New("no official"))
+	_, source := KnownModelsWithSource()
+	if source != sourceRemote {
+		t.Fatalf("source = %q, want %q (empty cache must be ignored)", source, sourceRemote)
+	}
+}
+
+func TestKnownModelsWithSourceIgnoresIncompatibleVersion(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	body := `{"version":999,"source":"official","fetched_at":"2026-06-08T15:30:00Z","models":[{"id":"minimax-m3"}]}`
+	if err := os.WriteFile(cachePath, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	restoreCache := SetCacheFileForTest(cachePath)
+	t.Cleanup(restoreCache)
+	withModelFetchers(t, map[string]remoteModelInfo{"remote-a": {}}, nil, errors.New("no official"))
+	_, source := KnownModelsWithSource()
+	if source != sourceRemote {
+		t.Fatalf("source = %q, want %q (incompatible version must be ignored)", source, sourceRemote)
+	}
+}
+
+func TestRefreshOfficialModelsWritesCacheOnSuccess(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	restoreCache := SetCacheFileForTest(cachePath)
+	restoreOfficial := SetOfficialFetcherForTest(func() ([]OfficialModel, error) {
+		return []OfficialModel{
+			{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
+		}, nil
+	})
+	t.Cleanup(func() {
+		restoreCache()
+		restoreOfficial()
+	})
+
+	if err := RefreshOfficialModels(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("cache file should exist after RefreshOfficialModels success: %v", err)
+	}
+	var cache CatalogCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		t.Fatal(err)
+	}
+	if len(cache.Models) != 1 || cache.Models[0].ID != "minimax-m3" || cache.Models[0].Created != 1 {
+		t.Fatalf("cache models = %+v (want exactly the model returned by the fetcher)", cache.Models)
+	}
+	if cache.Source != sourceOfficial {
+		t.Fatalf("cache source = %q, want %q", cache.Source, sourceOfficial)
+	}
+
+	got, _ := KnownModelsWithSource()
+	if len(got) != 1 || got[0].ID != "minimax-m3" {
+		t.Fatalf("KnownModels after refresh = %+v, want refresh result visible", got)
+	}
+}
+
+func TestRefreshOfficialModelsReturnsErrorOnFailure(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	restoreCache := SetCacheFileForTest(cachePath)
+	restoreOfficial := SetOfficialFetcherForTest(func() ([]OfficialModel, error) {
+		return nil, errors.New("upstream down")
+	})
+	t.Cleanup(func() {
+		restoreCache()
+		restoreOfficial()
+	})
+
+	if err := RefreshOfficialModels(); err == nil {
+		t.Fatal("expected RefreshOfficialModels to return error when fetcher fails")
+	}
+	if _, err := os.Stat(cachePath); err == nil {
+		t.Fatal("cache should not be written when fetcher fails")
+	}
+}
+
+func TestKnownModelsWithSourceDoesNotRewriteCacheOnRead(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "model-catalog-cache.json")
+	originalFetchedAt := time.Date(2026, 6, 8, 15, 30, 0, 0, time.UTC)
+	original := []OfficialModel{
+		{ID: "minimax-m3", Object: "model", Created: 99, OwnedBy: "opencode"},
+	}
+	if err := WriteCatalogCache(cachePath, original, sourceOfficial, originalFetchedAt); err != nil {
+		t.Fatal(err)
+	}
+	restoreCache := SetCacheFileForTest(cachePath)
+	restoreOfficial := SetOfficialFetcherForTest(func() ([]OfficialModel, error) {
+		return []OfficialModel{
+			{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
+		}, nil
+	})
+	t.Cleanup(func() {
+		restoreCache()
+		restoreOfficial()
+	})
+
+	got, source := KnownModelsWithSource()
+	if source != sourceOfficial {
+		t.Fatalf("source = %q, want %q", source, sourceOfficial)
+	}
+	if len(got) != 1 || got[0].Created != 1 {
+		t.Fatalf("got = %+v, want official models from injected fetcher", got)
+	}
+
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cache CatalogCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		t.Fatal(err)
+	}
+	firstFetchedAt := cache.FetchedAt
+	if !firstFetchedAt.After(originalFetchedAt) {
+		t.Fatalf("first call should rewrite cache with a fresher FetchedAt (got %v, original %v)", firstFetchedAt, originalFetchedAt)
+	}
+	if len(cache.Models) != 1 || cache.Models[0].Created != 1 {
+		t.Fatalf("cache models = %+v, want the freshly fetched models", cache.Models)
+	}
+
+	for i := 0; i < 5; i++ {
+		got, source := KnownModelsWithSource()
+		if source != sourceOfficial {
+			t.Fatalf("iteration %d: source = %q, want %q", i, source, sourceOfficial)
+		}
+		if len(got) != 1 || got[0].Created != 1 {
+			t.Fatalf("iteration %d: got = %+v", i, got)
+		}
+	}
+
+	data, err = os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cache); err != nil {
+		t.Fatal(err)
+	}
+	if !cache.FetchedAt.Equal(firstFetchedAt) {
+		t.Fatalf("cache FetchedAt changed from %v to %v (subsequent KnownModelsWithSource calls should not touch the cache)", firstFetchedAt, cache.FetchedAt)
+	}
 }
