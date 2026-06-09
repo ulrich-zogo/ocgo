@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,13 +39,16 @@ func openAIUpstreamURL() string {
 }
 
 type responsesStreamChunk struct {
-	Content string
-	ToolCalls []struct {
-		ID        string
-		Name      string
-		Arguments string
-	}
-	Usage compat.TokenUsage
+	Content   string
+	ToolCalls []responseStreamToolCallDelta
+	Usage     compat.TokenUsage
+}
+
+type responseStreamToolCallDelta struct {
+	Index     int
+	ID        string
+	Name      string
+	Arguments string
 }
 
 func parseStreamChunkForResponses(data []byte) responsesStreamChunk {
@@ -54,11 +58,8 @@ func parseStreamChunkForResponses(data []byte) responsesStreamChunk {
 		Usage:   chunk.Usage,
 	}
 	for _, tc := range chunk.ToolCalls {
-		out.ToolCalls = append(out.ToolCalls, struct {
-			ID        string
-			Name      string
-			Arguments string
-		}{
+		out.ToolCalls = append(out.ToolCalls, responseStreamToolCallDelta{
+			Index:     tc.Index,
 			ID:        tc.ID,
 			Name:      extractStreamToolName(data, tc.Index),
 			Arguments: extractStreamToolArguments(data, tc.Index, tc.Arguments),
@@ -323,10 +324,19 @@ func StreamChatCompletionAsResponses(w http.ResponseWriter, body io.Reader, mode
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var mu sync.Mutex
 	var lastUsage compat.TokenUsage
+	tools := newResponseStreamToolCallAccumulator()
+
+	emitText := func(text string) {
+		delta := map[string]any{
+			"type":  "response.output_text.delta",
+			"delta": text,
+		}
+		if b, err := json.Marshal(delta); err == nil {
+			fmt.Fprintf(w, "event: response.output_text.delta\ndata: %s\n\n", b)
+		}
+	}
 
 	flushDone := func() {
-		mu.Lock()
-		defer mu.Unlock()
 		completed := map[string]any{
 			"type": "response.completed",
 			"response": map[string]any{
@@ -357,72 +367,163 @@ func StreamChatCompletionAsResponses(w http.ResponseWriter, body io.Reader, mode
 			break
 		}
 		chunk := parseStreamChunkForResponses([]byte(data))
+		mu.Lock()
 		if chunk.Content != "" {
-			delta := map[string]any{
-				"type":  "response.output_text.delta",
-				"delta": chunk.Content,
-			}
-			mu.Lock()
-			if b, err := json.Marshal(delta); err == nil {
-				fmt.Fprintf(w, "event: response.output_text.delta\ndata: %s\n\n", b)
-				flusher.Flush()
-			}
-			mu.Unlock()
+			emitText(chunk.Content)
 		}
 		if len(chunk.ToolCalls) > 0 {
 			for _, tc := range chunk.ToolCalls {
-				args := tc.Arguments
-				itemAdded := map[string]any{
-					"type":     "response.output_item.added",
-					"item": map[string]any{
-						"type":    "function_call",
-						"id":      tc.ID,
-						"call_id": tc.ID,
-						"name":    tc.Name,
-					},
-				}
-				mu.Lock()
-				if b, err := json.Marshal(itemAdded); err == nil {
-					fmt.Fprintf(w, "event: response.output_item.added\ndata: %s\n\n", b)
-				}
-				if args != "" {
-					argDelta := map[string]any{
-						"type": "response.function_call_arguments.delta",
-						"item_id": tc.ID,
-						"delta":   args,
-					}
-					if b, err := json.Marshal(argDelta); err == nil {
-						fmt.Fprintf(w, "event: response.function_call_arguments.delta\ndata: %s\n\n", b)
-					}
-				}
-				itemDone := map[string]any{
-					"type": "response.output_item.done",
-					"item": map[string]any{
-						"type":      "function_call",
-						"id":        tc.ID,
-						"call_id":   tc.ID,
-						"name":      tc.Name,
-						"arguments": args,
-					},
-				}
-				if b, err := json.Marshal(itemDone); err == nil {
-					fmt.Fprintf(w, "event: response.output_item.done\ndata: %s\n\n", b)
-				}
-				flusher.Flush()
-				mu.Unlock()
+				tools.Absorb(tc)
 			}
+		}
+		for _, ev := range tools.DrainEvents() {
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Event, ev.Data)
 		}
 		if chunk.Usage.Present {
 			lastUsage = chunk.Usage
 		}
+		flusher.Flush()
+		mu.Unlock()
+	}
+	mu.Lock()
+	for _, ev := range tools.FlushDone() {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Event, ev.Data)
 	}
 	flushDone()
+	mu.Unlock()
 	if err := scanner.Err(); err != nil {
 		mu.Lock()
 		fmt.Fprintf(w, "data: {\"type\":\"error\",\"error\":{\"message\":%q}}\n\n", err.Error())
 		flusher.Flush()
 		mu.Unlock()
 	}
+}
+
+type responseStreamToolCallAccumulator struct {
+	calls map[int]*responseStreamToolCallState
+}
+
+type responseStreamToolCallState struct {
+	ID        string
+	Name      string
+	Arguments strings.Builder
+	Added     bool
+	Final     bool
+}
+
+type responseStreamEvent struct {
+	Event string
+	Data  string
+}
+
+func newResponseStreamToolCallAccumulator() *responseStreamToolCallAccumulator {
+	return &responseStreamToolCallAccumulator{calls: map[int]*responseStreamToolCallState{}}
+}
+
+func (a *responseStreamToolCallAccumulator) Absorb(tc responseStreamToolCallDelta) {
+	state, ok := a.calls[tc.Index]
+	if !ok {
+		state = &responseStreamToolCallState{}
+		a.calls[tc.Index] = state
+	}
+	if tc.ID != "" {
+		state.ID = tc.ID
+	}
+	if tc.Name != "" {
+		state.Name = tc.Name
+	}
+	if tc.Arguments != "" {
+		state.Arguments.WriteString(tc.Arguments)
+	}
+}
+
+// DrainEvents emits any new SSE event that should be sent for the
+// current state. It returns the events produced by the latest absorb
+// only (id/name "added" once, argument deltas as they arrive).
+func (a *responseStreamToolCallAccumulator) DrainEvents() []responseStreamEvent {
+	var events []responseStreamEvent
+	indices := make([]int, 0, len(a.calls))
+	for idx := range a.calls {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	for _, idx := range indices {
+		state := a.calls[idx]
+		if !state.Added && state.ID != "" {
+			item := map[string]any{
+				"type":    "function_call",
+				"id":      state.ID,
+				"call_id": state.ID,
+				"name":    state.Name,
+			}
+			if b, err := json.Marshal(item); err == nil {
+				events = append(events, responseStreamEvent{
+					Event: "response.output_item.added",
+					Data:  string(b),
+				})
+			}
+			state.Added = true
+		}
+		if state.Final {
+			continue
+		}
+		if state.ID == "" {
+			continue
+		}
+		args := state.Arguments.String()
+		if args == "" {
+			continue
+		}
+		argDelta := map[string]any{
+			"type":    "response.function_call_arguments.delta",
+			"item_id": state.ID,
+			"delta":   args,
+		}
+		if b, err := json.Marshal(argDelta); err == nil {
+			events = append(events, responseStreamEvent{
+				Event: "response.function_call_arguments.delta",
+				Data:  string(b),
+			})
+		}
+	}
+	return events
+}
+
+// FlushDone emits the closing "response.output_item.done" event for
+// each tracked tool call with its full accumulated state. It is called
+// once at end-of-stream.
+func (a *responseStreamToolCallAccumulator) FlushDone() []responseStreamEvent {
+	var events []responseStreamEvent
+	indices := make([]int, 0, len(a.calls))
+	for idx := range a.calls {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	for _, idx := range indices {
+		state := a.calls[idx]
+		if state.ID == "" {
+			continue
+		}
+		args := state.Arguments.String()
+		if args == "" {
+			args = "{}"
+		}
+		item := map[string]any{
+			"type":      "function_call",
+			"id":        state.ID,
+			"call_id":   state.ID,
+			"name":      state.Name,
+			"arguments": args,
+		}
+		if b, err := json.Marshal(item); err == nil {
+			events = append(events, responseStreamEvent{
+				Event: "response.output_item.done",
+				Data:  string(b),
+			})
+		}
+		state.Final = true
+	}
+	return events
 }
 
 func StreamAnthropicAsResponses(w http.ResponseWriter, body io.Reader, model string) {
@@ -677,27 +778,47 @@ func ResponsesHandler(w http.ResponseWriter, r *http.Request, cfg config.Config)
 func runResponsesHandler(w http.ResponseWriter, r *http.Request, cfg config.Config, rr compat.ResponsesRequest, or compat.OAIRequest) {
 	model := rr.Model
 	if models.UsesAnthropicEndpoint(model) {
-		ar := ChatToAnthropic(or)
-		ar.Model = mapping.ResolveToolModel("claude", model)
-		resp, err := ForwardAnthropic(r.Context(), cfg, ar)
-		if err != nil {
-			WriteOpenAIError(w, http.StatusBadGateway, fmt.Sprintf("Upstream error: %v", err), "upstream_error", "", "upstream_failure")
-			return
-		}
-		defer resp.Body.Close()
-		CopyHeaders(w.Header(), resp.Header)
-		w.WriteHeader(resp.StatusCode)
-		if rr.Stream {
-			StreamAnthropicAsResponses(w, resp.Body, model)
-		} else {
-			parsed := ParseAnthropicResponse(resp.Body)
-			respObj := ConvertAnthropicToResponses(model, parsed)
-			b, _ := json.Marshal(respObj)
-			w.Write(b)
-		}
+		runAnthropicResponsesHandler(w, r, cfg, rr, or, model)
 		return
 	}
+	runOpenAIResponsesHandler(w, r, cfg, or, model)
+}
 
+func runAnthropicResponsesHandler(w http.ResponseWriter, r *http.Request, cfg config.Config, rr compat.ResponsesRequest, or compat.OAIRequest, model string) {
+	ar := ChatToAnthropic(or)
+	ar.Model = mapping.ResolveToolModel("claude", model)
+	resp, err := ForwardAnthropic(r.Context(), cfg, ar)
+	if err != nil {
+		WriteOpenAIError(w, http.StatusBadGateway, fmt.Sprintf("Upstream error: %v", err), "upstream_error", "", "upstream_failure")
+		return
+	}
+	defer resp.Body.Close()
+	if rr.Stream {
+		CopyHeaders(w.Header(), resp.Header)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(resp.StatusCode)
+		StreamAnthropicAsResponses(w, resp.Body, model)
+		return
+	}
+	upstreamBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		WriteOpenAIError(w, http.StatusBadGateway, fmt.Sprintf("read upstream: %v", err), "upstream_error", "", "upstream_failure")
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		WriteUpstreamOpenAIError(w, resp.StatusCode, upstreamBody)
+		return
+	}
+	parsed := ParseAnthropicResponse(bytes.NewReader(upstreamBody))
+	respObj := ConvertAnthropicToResponses(model, parsed)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	b, _ := json.Marshal(respObj)
+	w.Write(b)
+}
+
+func runOpenAIResponsesHandler(w http.ResponseWriter, r *http.Request, cfg config.Config, or compat.OAIRequest, model string) {
 	body, err := json.Marshal(or)
 	if err != nil {
 		WriteOpenAIError(w, http.StatusInternalServerError, fmt.Sprintf("marshal: %v", err), "server_error", "", "internal")
@@ -719,13 +840,30 @@ func runResponsesHandler(w http.ResponseWriter, r *http.Request, cfg config.Conf
 	}
 	defer resp.Body.Close()
 
-	CopyHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-
 	if or.Stream {
+		CopyHeaders(w.Header(), resp.Header)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(resp.StatusCode)
 		StreamChatCompletionAsResponses(w, resp.Body, model)
-	} else {
-		upstreamBody, _ := io.ReadAll(resp.Body)
-		WriteResponsesFromChatCompletion(w, model, upstreamBody)
+		return
 	}
+	upstreamBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		WriteOpenAIError(w, http.StatusBadGateway, fmt.Sprintf("read upstream: %v", err), "upstream_error", "", "upstream_failure")
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		WriteUpstreamOpenAIError(w, resp.StatusCode, upstreamBody)
+		return
+	}
+	respObj, err := ConvertChatCompletionToResponses(model, upstreamBody)
+	if err != nil {
+		WriteOpenAIError(w, http.StatusBadGateway, fmt.Sprintf("convert upstream response: %v", err), "upstream_error", "", "upstream_failure")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	b, _ := json.Marshal(respObj)
+	w.Write(b)
 }
