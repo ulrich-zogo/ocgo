@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"ocgo/internal/config"
 	"ocgo/internal/models"
@@ -256,8 +257,9 @@ func TestManagerCheckVersionErrorWhenCodexMissing(t *testing.T) {
 
 func TestManagerDesktopStateShape(t *testing.T) {
 	state := DesktopState{
-		Mode:      ModeCLI,
-		UpdatedAt: "2026-06-09T00:00:00Z",
+		Version:   DesktopStateVersion,
+		Mode:      DesktopModeOpenCode,
+		UpdatedAt: time.Date(2026, 6, 9, 0, 0, 0, 0, time.UTC),
 		BaseURL:   "http://127.0.0.1:3456/v1/",
 		Model:     "minimax-m3",
 	}
@@ -265,7 +267,13 @@ func TestManagerDesktopStateShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"mode":"cli"`, `"updated_at":"2026-06-09T00:00:00Z"`, `"base_url":"http://127.0.0.1:3456/v1/"`, `"model":"minimax-m3"`} {
+	for _, want := range []string{
+		`"version":1`,
+		`"mode":"opencode"`,
+		`"updated_at":"2026-06-09T00:00:00Z"`,
+		`"base_url":"http://127.0.0.1:3456/v1/"`,
+		`"model":"minimax-m3"`,
+	} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("DesktopState JSON missing %q in %s", want, string(data))
 		}
