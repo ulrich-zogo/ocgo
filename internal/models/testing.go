@@ -64,3 +64,9 @@ func SetOfficialFetcherForTest(fn func() ([]OfficialModel, error)) func() {
 		officialModels = newLazyFetcher(fetchOfficialModelsAndCache)
 	}
 }
+
+func SetModelSelectionFileForTest(path string) func() {
+	old := ModelSelectionFile
+	ModelSelectionFile = func() string { return path }
+	return func() { ModelSelectionFile = old }
+}
