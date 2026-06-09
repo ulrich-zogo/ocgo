@@ -62,12 +62,6 @@ func NewMux(cfg config.Config) *http.ServeMux {
 	return mux
 }
 
-func CountTokens(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"input_tokens":0}`))
-}
-
 func ProxyMessages(w http.ResponseWriter, r *http.Request, cfg config.Config) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

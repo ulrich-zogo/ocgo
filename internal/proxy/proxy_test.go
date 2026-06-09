@@ -655,12 +655,14 @@ func TestCountTokensEndpointPath(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/messages/count_tokens", CountTokens)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	// A non-empty Anthropic-shaped body must produce 200 and an
+	// input_tokens field.
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("count_tokens status = %d, want 200", w.Code)
+		t.Fatalf("count_tokens status = %d, want 200; body = %s", w.Code, w.Body.String())
 	}
 	if !strings.Contains(w.Body.String(), `"input_tokens"`) {
 		t.Fatalf("count_tokens body missing input_tokens: %s", w.Body.String())
