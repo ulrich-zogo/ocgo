@@ -1,8 +1,8 @@
 package proxy
 
 import (
-	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -55,28 +55,30 @@ func CountTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 // estimateTokensFromBody returns the per-shape estimate based on a
-// quick peek at the JSON top-level keys.
+// strict decode of the JSON body.
 func estimateTokensFromBody(body []byte) (tokens.Estimate, error) {
 	trimmed := trimAll(body)
 	if len(trimmed) == 0 {
 		return tokens.Estimate{}, tokens.ErrEmptyBody{}
 	}
 
-	// If the body is not a JSON object at all (or is malformed),
-	// surface a 400. EstimateJSONTokens silently falls back to
-	// text, which would mask a client bug as a successful 0/1
-	// token response.
-	keys, ok := topLevelKeysOK(trimmed)
-	if !ok {
-		return tokens.Estimate{}, errTokensInvalidJSON{msg: "request body is not a JSON object"}
+	// Strict decode: refuse trailing JSON, refuse non-object
+	// top-level values. This is the single source of truth for
+	// "is this a valid JSON object".
+	var doc map[string]any
+	if err := tokens.DecodeJSONObjectStrict(trimmed, &doc); err != nil {
+		if errors.Is(err, tokens.ErrEmptyBody{}) {
+			return tokens.Estimate{}, tokens.ErrEmptyBody{}
+		}
+		return tokens.Estimate{}, errTokensInvalidJSON{msg: err.Error()}
 	}
 
 	// Responses-shape detection: explicit "input" or "instructions"
 	// at the top level, with or without messages.
-	if _, hasInput := keys["input"]; hasInput {
+	if _, hasInput := doc["input"]; hasInput {
 		return tokens.EstimateResponsesTokens(trimmed)
 	}
-	if _, hasInstructions := keys["instructions"]; hasInstructions {
+	if _, hasInstructions := doc["instructions"]; hasInstructions {
 		return tokens.EstimateResponsesTokens(trimmed)
 	}
 
@@ -91,10 +93,10 @@ func estimateTokensFromBody(body []byte) (tokens.Estimate, error) {
 	// {type, function}. To keep the surface simple, we dispatch
 	// on the "tools" shape when present and fall back to
 	// Anthropic otherwise.
-	if _, hasSystem := keys["system"]; hasSystem {
+	if _, hasSystem := doc["system"]; hasSystem {
 		return tokens.EstimateAnthropicCountTokens(trimmed)
 	}
-	if tools, ok := peekTools(trimmed); ok && len(tools) > 0 {
+	if tools, ok := peekTools(doc); ok && len(tools) > 0 {
 		first, _ := tools[0].(map[string]any)
 		if _, isAnthropic := first["input_schema"]; isAnthropic {
 			return tokens.EstimateAnthropicCountTokens(trimmed)
@@ -108,15 +110,68 @@ func estimateTokensFromBody(body []byte) (tokens.Estimate, error) {
 		// common shape in the OCGO client surface).
 		return tokens.EstimateAnthropicCountTokens(trimmed)
 	}
-	if _, hasMessages := keys["messages"]; hasMessages {
-		// No "system" and no "tools": still an Anthropic-shaped
-		// request (the most common case for count_tokens).
+	if _, hasMessages := doc["messages"]; hasMessages {
+		// When messages is present without "system" and without
+		// "tools", we have to disambiguate Anthropic vs OpenAI
+		// by looking at the messages themselves. Anthropic uses
+		// {"type": "text"|"image"|"tool_use"|"tool_result",
+		// ...}; OpenAI uses {"role", "content"|"tool_calls",
+		// "tool_call_id", "name"} with content parts of
+		// {"type": "text"|"image_url"}. If any message looks
+		// like OpenAI, we route to the OpenAI estimator so we
+		// don't lose the image_url or tool_calls overhead.
+		if looksLikeOpenAIChatMessages(doc) {
+			return tokens.EstimateOpenAIChatTokens(trimmed)
+		}
+		// Default: Anthropic (the most common shape in the
+		// OCGO client surface).
 		return tokens.EstimateAnthropicCountTokens(trimmed)
 	}
 	// Unknown shape but valid JSON object: count the whole body as
 	// JSON. This is a best-effort estimate for non-standard clients
 	// and is intentionally tolerant.
 	return tokens.Estimate{InputTokens: tokens.EstimateJSONTokens(trimmed)}, nil
+}
+
+// looksLikeOpenAIChatMessages returns true when the top-level
+// "messages" array carries any field that is OpenAI-specific and
+// not part of the Anthropic Messages shape. The list is:
+//
+//   - any message with "tool_calls" (OpenAI tool calls) or
+//     "tool_call_id" (OpenAI tool result)
+//   - any message content part with type "image_url"
+//
+// A pure {role, content:string} list with no system/tools is
+// ambiguous and falls through to the default Anthropic path.
+func looksLikeOpenAIChatMessages(doc map[string]any) bool {
+	msgs, ok := doc["messages"].([]any)
+	if !ok {
+		return false
+	}
+	for _, m := range msgs {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, hasTC := mm["tool_calls"]; hasTC {
+			return true
+		}
+		if _, hasTCID := mm["tool_call_id"]; hasTCID {
+			return true
+		}
+		if parts, ok := mm["content"].([]any); ok {
+			for _, p := range parts {
+				pp, ok := p.(map[string]any)
+				if !ok {
+					continue
+				}
+				if t, _ := pp["type"].(string); t == "image_url" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // classifyTokensError maps an internal/tokens error into a short
@@ -184,42 +239,40 @@ func trimAll(b []byte) []byte {
 	return b[start:end]
 }
 
-// topLevelKeys peeks at the top-level keys of a JSON object without
-// doing a full decode. The estimate does not need a full parse: the
-// dispatch only inspects the first level of keys. We do a minimal
-// scan and bail if the body is not a JSON object.
+// topLevelKeys returns the top-level keys of a JSON object without
+// surfacing decoding errors. Trailing-JSON errors are swallowed and
+// reported as "not a JSON object" so that callers that only need
+// the key set still behave sanely. The strict version of the
+// decoder (tokens.DecodeJSONObjectStrict) is the source of truth
+// for the handler path.
 func topLevelKeys(raw []byte) map[string]struct{} {
 	keys, _ := topLevelKeysOK(raw)
 	return keys
 }
 
 // topLevelKeysOK returns the top-level keys of a JSON object and a
-// bool indicating whether the body decoded as a JSON object.
+// bool indicating whether the body strictly decoded as a JSON
+// object. Trailing JSON, syntax errors, and non-object top-level
+// values all return (nil, false).
 func topLevelKeysOK(raw []byte) (map[string]struct{}, bool) {
-	out := map[string]struct{}{}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var peek map[string]any
-	if err := dec.Decode(&peek); err != nil {
+	var doc map[string]any
+	if err := tokens.DecodeJSONObjectStrict(raw, &doc); err != nil {
 		return nil, false
 	}
-	for k := range peek {
+	out := make(map[string]struct{}, len(doc))
+	for k := range doc {
 		out[k] = struct{}{}
 	}
 	return out, true
 }
 
-// peekTools reads just the "tools" array of a top-level object. It
-// is used to detect Anthropic-vs-OpenAI tool shapes. Returns ok=true
-// only if "tools" is present (even if empty).
-func peekTools(raw []byte) ([]any, bool) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var peek map[string]any
-	if err := dec.Decode(&peek); err != nil {
-		return nil, false
-	}
-	v, ok := peek["tools"]
+// peekTools reads the "tools" array of a strictly-decoded top-level
+// object. It is used to detect Anthropic-vs-OpenAI tool shapes.
+// Returns ok=true only if "tools" is present (even if empty) AND
+// the body was a valid JSON object. A non-object body returns
+// (nil, false) so callers fall through to the "no tools" branch.
+func peekTools(doc map[string]any) ([]any, bool) {
+	v, ok := doc["tools"]
 	if !ok {
 		return nil, false
 	}

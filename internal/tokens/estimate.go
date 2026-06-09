@@ -13,7 +13,11 @@
 package tokens
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -34,6 +38,43 @@ const (
 // Estimate is the minimal shape returned to the client.
 type Estimate struct {
 	InputTokens int `json:"input_tokens"`
+}
+
+// ErrTrailingJSON is returned by DecodeJSONObjectStrict when the
+// input contains valid JSON followed by additional, non-whitespace
+// tokens. Strict decoding refuses to silently accept a body that
+// may have been truncated or concatenated.
+var ErrTrailingJSON = errors.New("unexpected trailing JSON after first object")
+
+// DecodeJSONObjectStrict decodes raw as a single JSON object into
+// dst. It refuses trailing tokens: any second Decode call must hit
+// io.EOF, otherwise the body is rejected as malformed. The
+// underlying decoder uses UseNumber so numeric fields decode to
+// json.Number.
+//
+// Errors:
+//   - syntax error in the body
+//   - body is valid JSON but not an object (e.g. array, string)
+//   - ErrTrailingJSON if there is content after the first value
+//   - ErrEmptyBody if raw is empty or whitespace-only
+func DecodeJSONObjectStrict(raw []byte, dst *map[string]any) error {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return ErrEmptyBody{}
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.UseNumber()
+	if err := dec.Decode(dst); err != nil {
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return ErrTrailingJSON
+		}
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	return nil
 }
 
 // EstimateTextTokens returns a conservative token estimate for a free
@@ -93,13 +134,11 @@ func EstimateJSONTokens(raw []byte) int {
 // (not the Go struct) so the handler can validate format errors
 // itself and return OpenAI-shaped errors.
 func EstimateAnthropicCountTokens(raw []byte) (Estimate, error) {
-	if len(bytesTrim(raw)) == 0 {
-		return Estimate{}, errEmptyBody
-	}
 	var v map[string]any
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.UseNumber()
-	if err := dec.Decode(&v); err != nil {
+	if err := DecodeJSONObjectStrict(raw, &v); err != nil {
+		if errors.Is(err, ErrEmptyBody{}) {
+			return Estimate{}, errEmptyBody
+		}
 		return Estimate{}, errInvalidJSON{err: err}
 	}
 	tokens := RequestOverheadTokens
@@ -119,13 +158,11 @@ func EstimateAnthropicCountTokens(raw []byte) (Estimate, error) {
 // route tolerates this shape so that clients that send OpenAI-style
 // counts are not rejected with 400.
 func EstimateOpenAIChatTokens(raw []byte) (Estimate, error) {
-	if len(bytesTrim(raw)) == 0 {
-		return Estimate{}, errEmptyBody
-	}
 	var v map[string]any
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.UseNumber()
-	if err := dec.Decode(&v); err != nil {
+	if err := DecodeJSONObjectStrict(raw, &v); err != nil {
+		if errors.Is(err, ErrEmptyBody{}) {
+			return Estimate{}, errEmptyBody
+		}
 		return Estimate{}, errInvalidJSON{err: err}
 	}
 	tokens := RequestOverheadTokens
@@ -142,13 +179,11 @@ func EstimateOpenAIChatTokens(raw []byte) (Estimate, error) {
 // EstimateResponsesTokens estimates the input_tokens for an OpenAI
 // Responses API payload.
 func EstimateResponsesTokens(raw []byte) (Estimate, error) {
-	if len(bytesTrim(raw)) == 0 {
-		return Estimate{}, errEmptyBody
-	}
 	var v map[string]any
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.UseNumber()
-	if err := dec.Decode(&v); err != nil {
+	if err := DecodeJSONObjectStrict(raw, &v); err != nil {
+		if errors.Is(err, ErrEmptyBody{}) {
+			return Estimate{}, errEmptyBody
+		}
 		return Estimate{}, errInvalidJSON{err: err}
 	}
 	tokens := RequestOverheadTokens
@@ -162,16 +197,6 @@ func EstimateResponsesTokens(raw []byte) (Estimate, error) {
 }
 
 // ---------- internals ----------
-
-func bytesTrim(b []byte) []byte {
-	for i := 0; i < len(b); i++ {
-		c := b[i]
-		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
-			return b[i:]
-		}
-	}
-	return nil
-}
 
 func estimateStringField(m map[string]any, key string) int {
 	v, ok := m[key]
