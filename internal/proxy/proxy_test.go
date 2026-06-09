@@ -995,3 +995,210 @@ func TestProxyModelsUsesCacheWhenOfficialAndRemoteFail(t *testing.T) {
 	}
 }
 
+// TestStreamResponsesFinalUsageDerivesTotalWhenAbsent exercises the
+// Responses-compat stream path: when the upstream OpenAI chunk
+// reports prompt_tokens + completion_tokens but no total_tokens,
+// the final response.completed event must surface a derived
+// total_tokens (input+output).
+func TestStreamResponsesFinalUsageDerivesTotalWhenAbsent(t *testing.T) {
+	body := bytes.NewReader([]byte(strings.Join([]string{
+		`data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"kimi-k2.6","choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+		`data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"kimi-k2.6","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")))
+
+	rr := httptest.NewRecorder()
+	StreamChatCompletionAsResponses(rr, body, "kimi-k2.6")
+	out := rr.Body.String()
+	if !strings.Contains(out, `"event":"response.completed"`) &&
+		!strings.Contains(out, "event: response.completed") {
+		t.Fatalf("missing response.completed event:\n%s", out)
+	}
+	if !strings.Contains(out, `"total_tokens":10`) &&
+		!strings.Contains(out, "total_tokens: 10") {
+		t.Fatalf("response.completed usage must derive total_tokens=10; got:\n%s", out)
+	}
+}
+
+// TestStreamResponsesFinalUsagePreservesCachedTokens verifies that
+// prompt_tokens_details.cached_tokens (a nested object in the
+// upstream OpenAI chunk) is preserved and exposed in the final
+// response.completed event.
+func TestStreamResponsesFinalUsagePreservesCachedTokens(t *testing.T) {
+	body := bytes.NewReader([]byte(strings.Join([]string{
+		`data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"kimi-k2.6","choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+		`data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"kimi-k2.6","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":4}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")))
+
+	rr := httptest.NewRecorder()
+	StreamChatCompletionAsResponses(rr, body, "kimi-k2.6")
+	out := rr.Body.String()
+	if !strings.Contains(out, `"cached_tokens":4`) &&
+		!strings.Contains(out, "cached_tokens: 4") {
+		t.Fatalf("response.completed usage must preserve cached_tokens=4; got:\n%s", out)
+	}
+	if !strings.Contains(out, `"total_tokens":15`) &&
+		!strings.Contains(out, "total_tokens: 15") {
+		t.Fatalf("response.completed usage must include total_tokens=15; got:\n%s", out)
+	}
+}
+
+// TestStreamAnthropicFinalUsageForwarded verifies that the
+// passthrough Anthropic stream keeps the upstream usage object
+// intact in the SSE body (input_tokens + output_tokens visible).
+func TestStreamAnthropicFinalUsageForwarded(t *testing.T) {
+	body := bytes.NewReader([]byte(strings.Join([]string{
+		`data: {"choices":[{"delta":{"content":"hi"}}]}`,
+		`data: {"choices":[],"usage":{"input_tokens":7,"output_tokens":3}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")))
+
+	w := httptest.NewRecorder()
+	StreamAnthropic(w, body, "minimax-m3")
+	out := w.Body.String()
+	if !strings.Contains(out, `"input_tokens":7`) {
+		t.Fatalf("missing input_tokens in forwarded stream:\n%s", out)
+	}
+	if !strings.Contains(out, `"output_tokens":3`) {
+		t.Fatalf("missing output_tokens in forwarded stream:\n%s", out)
+	}
+}
+
+// TestNewMuxAllEndpointsRegistered is a non-regression test that
+// verifies the full set of HTTP routes registered by NewMux. It
+// does not exercise the request bodies deeply (those are covered
+// by per-handler tests); it only checks that the routes are
+// reachable, that the count_tokens route produces a non-zero
+// input_tokens estimate, and that bad methods on the supported
+// routes return 405 rather than 404.
+func TestNewMuxAllEndpointsRegistered(t *testing.T) {
+	isolateCacheForTest(t)
+	models.ResetFetchersForTest()
+	models.SetFetchersForTest(nil, []models.OfficialModel{
+		{ID: "minimax-m3", Object: "model", Created: 1, OwnedBy: "opencode"},
+		{ID: "kimi-k2.6", Object: "model", Created: 2, OwnedBy: "opencode"},
+	}, nil, nil)
+	t.Cleanup(func() { models.ResetFetchersForTest() })
+
+	mux := NewMux(config.Config{})
+
+	// /health
+	{
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("/health status = %d, want 200", w.Code)
+		}
+	}
+
+	// /v1/models
+	{
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("/v1/models status = %d, want 200", w.Code)
+		}
+	}
+
+	// /v1/messages/count_tokens - non-zero estimate
+	{
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens",
+			strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("/v1/messages/count_tokens status = %d, want 200", w.Code)
+		}
+		var est struct {
+			InputTokens int `json:"input_tokens"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &est); err != nil {
+			t.Errorf("/v1/messages/count_tokens body = %s, want parseable", w.Body.String())
+		}
+		if est.InputTokens < 1 {
+			t.Errorf("/v1/messages/count_tokens estimate = %d, want >= 1", est.InputTokens)
+		}
+	}
+
+	// /v1/messages/count_tokens - GET => 405
+	{
+		req := httptest.NewRequest(http.MethodGet, "/v1/messages/count_tokens", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("GET /v1/messages/count_tokens status = %d, want 405", w.Code)
+		}
+	}
+
+	// /v1/messages - must be a registered route. We don't fully
+	// exercise it because it forwards to a real upstream; we only
+	// check that a method-allowed POST with an empty body returns
+	// 4xx (a 4xx proves the route is wired up, since an
+	// unregistered route would return 404).
+	{
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages",
+			strings.NewReader(`{"model":"minimax-m3","messages":[{"role":"user","content":"hi"}],"max_tokens":16}`))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code == http.StatusNotFound {
+			t.Errorf("POST /v1/messages status = 404, route is not registered")
+		}
+	}
+
+	// /v1/chat/completions - same reasoning
+	{
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+			strings.NewReader(`{"model":"kimi-k2.6","messages":[{"role":"user","content":"hi"}]}`))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code == http.StatusNotFound {
+			t.Errorf("POST /v1/chat/completions status = 404, route is not registered")
+		}
+	}
+
+	// /v1/responses - same reasoning
+	{
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses",
+			strings.NewReader(`{"model":"kimi-k2.6","input":"hi"}`))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code == http.StatusNotFound {
+			t.Errorf("POST /v1/responses status = 404, route is not registered")
+		}
+	}
+
+	// /v1/messages - GET => 405
+	{
+		req := httptest.NewRequest(http.MethodGet, "/v1/messages", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("GET /v1/messages status = %d, want 405", w.Code)
+		}
+	}
+	// /v1/chat/completions - GET => 405
+	{
+		req := httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("GET /v1/chat/completions status = %d, want 405", w.Code)
+		}
+	}
+	// /v1/responses - GET => 405
+	{
+		req := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("GET /v1/responses status = %d, want 405", w.Code)
+		}
+	}
+}
+
