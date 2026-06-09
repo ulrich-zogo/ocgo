@@ -52,6 +52,61 @@ func TestWriteOpenAIErrorDefaultType(t *testing.T) {
 	}
 }
 
+func TestWriteUpstreamOpenAIErrorWithEnvelope(t *testing.T) {
+	rr := httptest.NewRecorder()
+	body := []byte(`{"error":{"message":"invalid model","type":"invalid_request_error","param":"model","code":"model_invalid"}}`)
+	WriteUpstreamOpenAIError(rr, http.StatusBadRequest, body)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+	var env OpenAIErrorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("body not JSON: %v", err)
+	}
+	if env.Error.Message != "invalid model" {
+		t.Errorf("message = %q, want 'invalid model'", env.Error.Message)
+	}
+	if env.Error.Type != "invalid_request_error" {
+		t.Errorf("type = %q, want 'invalid_request_error'", env.Error.Type)
+	}
+	if env.Error.Param != "model" {
+		t.Errorf("param = %q, want 'model'", env.Error.Param)
+	}
+	if env.Error.Code != "model_invalid" {
+		t.Errorf("code = %q, want 'model_invalid'", env.Error.Code)
+	}
+}
+
+func TestWriteUpstreamOpenAIErrorWithPlainBody(t *testing.T) {
+	rr := httptest.NewRecorder()
+	body := []byte(`service unavailable`)
+	WriteUpstreamOpenAIError(rr, http.StatusBadGateway, body)
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", rr.Code)
+	}
+	var env OpenAIErrorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("body not JSON: %v", err)
+	}
+	if env.Error.Type != "upstream_error" {
+		t.Errorf("type = %q, want 'upstream_error'", env.Error.Type)
+	}
+	if env.Error.Code != "upstream_failure" {
+		t.Errorf("code = %q, want 'upstream_failure'", env.Error.Code)
+	}
+}
+
+func TestWriteUpstreamOpenAIErrorEmptyBody(t *testing.T) {
+	rr := httptest.NewRecorder()
+	WriteUpstreamOpenAIError(rr, http.StatusInternalServerError, nil)
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), `"type":"upstream_error"`) {
+		t.Errorf("body should contain upstream_error type; got %s", rr.Body.String())
+	}
+}
+
 func TestValidateResponsesRequestMissingModel(t *testing.T) {
 	rr := compat.ResponsesRequest{Model: "  "}
 	err := ValidateResponsesRequest(rr)
@@ -847,6 +902,91 @@ func TestResponsesHandlerStreamingWithToolCalls(t *testing.T) {
 	}
 }
 
+func TestResponsesHandlerStreamingToolCallAccumulator(t *testing.T) {
+	chunks := []string{
+		"data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"kimi-k2.6\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"\"}}]}}]}\n\n",
+		"data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"kimi-k2.6\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"id\\\":\\\"\"}}]}}]}\n\n",
+		"data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"kimi-k2.6\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1\\\"}\"}}]}}]}\n\n",
+		"data: [DONE]\n\n",
+	}
+	streamBody := strings.Join(chunks, "")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(streamBody))
+	}))
+	defer upstream.Close()
+	old := OpenAIUpstreamURL
+	OpenAIUpstreamURL = upstream.URL
+	defer func() { OpenAIUpstreamURL = old }()
+
+	mux := NewMux(config.Config{Host: "127.0.0.1", Port: 0, APIKey: "test"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"kimi-k2.6","stream":true,"input":"hi"}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+
+	if c := strings.Count(body, "event: response.output_item.added"); c != 1 {
+		t.Errorf("response.output_item.added count = %d, want 1; body:\n%s", c, body)
+	}
+	if c := strings.Count(body, "event: response.output_item.done"); c != 1 {
+		t.Errorf("response.output_item.done count = %d, want 1; body:\n%s", c, body)
+	}
+
+	added := extractSSEData(t, body, "response.output_item.added")
+	if added == "" {
+		t.Fatalf("missing response.output_item.added data; body:\n%s", body)
+	}
+	var addedItem map[string]any
+	if err := json.Unmarshal([]byte(added), &addedItem); err != nil {
+		t.Fatalf("added item not JSON: %v", err)
+	}
+	if addedItem["id"] != "call_1" {
+		t.Errorf("added item id = %v, want call_1", addedItem["id"])
+	}
+	if addedItem["call_id"] != "call_1" {
+		t.Errorf("added item call_id = %v, want call_1", addedItem["call_id"])
+	}
+	if addedItem["name"] != "lookup" {
+		t.Errorf("added item name = %v, want lookup", addedItem["name"])
+	}
+
+	done := extractSSEData(t, body, "response.output_item.done")
+	if done == "" {
+		t.Fatalf("missing response.output_item.done data; body:\n%s", body)
+	}
+	var doneItem map[string]any
+	if err := json.Unmarshal([]byte(done), &doneItem); err != nil {
+		t.Fatalf("done item not JSON: %v", err)
+	}
+	if doneItem["id"] != "call_1" {
+		t.Errorf("done item id = %v, want call_1", doneItem["id"])
+	}
+	if doneItem["name"] != "lookup" {
+		t.Errorf("done item name = %v, want lookup", doneItem["name"])
+	}
+	if got, _ := doneItem["arguments"].(string); got != `{"id":"1"}` {
+		t.Errorf("done item arguments = %q, want %q", got, `{"id":"1"}`)
+	}
+}
+
+func extractSSEData(t *testing.T, body, eventName string) string {
+	t.Helper()
+	prefix := "event: " + eventName
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		if line == prefix && i+1 < len(lines) {
+			dataLine := lines[i+1]
+			if strings.HasPrefix(dataLine, "data: ") {
+				return strings.TrimPrefix(dataLine, "data: ")
+			}
+		}
+	}
+	return ""
+}
+
 func TestResponsesHandlerStreamingMalformedChunk(t *testing.T) {
 	streamBody := "data: not-valid-json\n\n" +
 		"data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"kimi-k2.6\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n" +
@@ -1093,5 +1233,95 @@ func TestResponsesHandlerJSONDecodeErrorShape(t *testing.T) {
 	}
 	if !strings.Contains(env.Error.Message, "Invalid JSON") {
 		t.Errorf("error message = %q, want 'Invalid JSON'", env.Error.Message)
+	}
+}
+
+func TestResponsesHandlerUpstreamOpenAIMalformedBody(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("not a chat completion JSON"))
+	}))
+	defer upstream.Close()
+	old := OpenAIUpstreamURL
+	OpenAIUpstreamURL = upstream.URL
+	defer func() { OpenAIUpstreamURL = old }()
+
+	mux := NewMux(config.Config{Host: "127.0.0.1", Port: 0, APIKey: "test"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"kimi-k2.6","input":"hi"}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code == http.StatusOK {
+		t.Fatalf("status = %d, want != 200 for malformed upstream; body=%s", rr.Code, rr.Body.String())
+	}
+	var env OpenAIErrorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("body not JSON: %v; raw=%s", err, rr.Body.String())
+	}
+	if env.Error.Type != "upstream_error" {
+		t.Errorf("type = %q, want upstream_error", env.Error.Type)
+	}
+}
+
+func TestResponsesHandlerUpstreamOpenAIErrorStatus(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"upstream boom","type":"upstream_error","code":"server_error"}}`))
+	}))
+	defer upstream.Close()
+	old := OpenAIUpstreamURL
+	OpenAIUpstreamURL = upstream.URL
+	defer func() { OpenAIUpstreamURL = old }()
+
+	mux := NewMux(config.Config{Host: "127.0.0.1", Port: 0, APIKey: "test"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"kimi-k2.6","input":"hi"}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
+	}
+	var env OpenAIErrorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("body not JSON: %v; raw=%s", err, rr.Body.String())
+	}
+	if env.Error.Message != "upstream boom" {
+		t.Errorf("message = %q, want 'upstream boom'", env.Error.Message)
+	}
+	if env.Error.Type != "upstream_error" {
+		t.Errorf("type = %q, want upstream_error", env.Error.Type)
+	}
+	if env.Error.Code != "server_error" {
+		t.Errorf("code = %q, want server_error", env.Error.Code)
+	}
+}
+
+func TestResponsesHandlerUpstreamAnthropicErrorStatus(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"server_error","message":"anthropic boom"}}`))
+	}))
+	defer upstream.Close()
+	old := AnthropicURL
+	AnthropicURL = upstream.URL
+	defer func() { AnthropicURL = old }()
+
+	mux := NewMux(config.Config{Host: "127.0.0.1", Port: 0, APIKey: "test"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"minimax-m3","input":"hi"}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
+	}
+	var env OpenAIErrorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("body not JSON: %v; raw=%s", err, rr.Body.String())
+	}
+	if env.Error.Message != "anthropic boom" {
+		t.Errorf("message = %q, want 'anthropic boom'", env.Error.Message)
+	}
+	if env.Error.Type != "server_error" {
+		t.Errorf("type = %q, want server_error", env.Error.Type)
 	}
 }
