@@ -23,6 +23,9 @@ install: build
 	mkdir -p "$(INSTALL_DIR)"
 	install -m 0755 "$(OCGO_BIN)" "$(INSTALL_DIR)/ocgo$(EXE)"
 
+check-fork-ownership:
+	./scripts/check-fork-ownership.sh
+
 release:
 	@[ -n "$(TAG)" ] || (echo "Usage: make release TAG=v0.1.0" && exit 1)
 	./scripts/release.sh "$(TAG)"

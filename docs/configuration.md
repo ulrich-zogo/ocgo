@@ -35,6 +35,16 @@ Do not commit these files to version control.
 - `host` — proxy bind address (default `127.0.0.1`)
 - `port` — proxy port (default `3456`)
 
+## Repository ownership
+
+This fork is documented and released under:
+
+```
+ulrich-zogo/ocgo
+```
+
+Release artifacts, Homebrew formulas, and all documentation should reference this fork. The original upstream is not referenced in active docs.
+
 ## Environment variable
 
 The API key can also be set at runtime without a config file:
