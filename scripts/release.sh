@@ -12,7 +12,7 @@ if [[ -z "$TAG" ]]; then
 fi
 
 VERSION="${TAG#v}"
-REPO="${GITHUB_REPOSITORY:-emanuelcasco/ocgo}"
+REPO="${GITHUB_REPOSITORY:-ulrich-zogo/ocgo}"
 if [[ -z "$REPO" ]]; then
   origin_url="$(git config --get remote.origin.url || true)"
   if [[ "$origin_url" =~ github.com[:/]([^/]+)/([^/.]+)(\.git)?$ ]]; then
@@ -23,7 +23,7 @@ if [[ -z "$REPO" ]]; then
   fi
 fi
 
-HOMEBREW_TAP_REPO="${HOMEBREW_TAP_REPO:-emanuelcasco/homebrew-tap}"
+HOMEBREW_TAP_REPO="${HOMEBREW_TAP_REPO:-ulrich-zogo/homebrew-tap}"
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "GitHub CLI is required: brew install gh && gh auth login"
