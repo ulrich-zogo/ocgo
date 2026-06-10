@@ -1,16 +1,16 @@
 <h1 align="center">ocgo</h1>
 <div align="center">
   <a href="https://github.com/ulrich-zogo/ocgo/releases">
-    <img alt="GitHub release" src="https://img.shields.io/github/v/release/emanuelcasco/ocgo?color=blue">
+    <img alt="GitHub release" src="https://img.shields.io/github/v/release/ulrich-zogo/ocgo?color=blue">
   </a>
   <a href="https://github.com/ulrich-zogo/ocgo/releases">
-    <img alt="GitHub downloads" src="https://img.shields.io/github/downloads/emanuelcasco/ocgo/total">
+    <img alt="GitHub downloads" src="https://img.shields.io/github/downloads/ulrich-zogo/ocgo/total">
   </a>
   <a href="https://github.com/ulrich-zogo/ocgo/blob/main/LICENSE">
-    <img alt="GitHub license" src="https://img.shields.io/github/license/emanuelcasco/ocgo">
+    <img alt="GitHub license" src="https://img.shields.io/github/license/ulrich-zogo/ocgo">
   </a>
   <a href="https://go.dev/doc/go1.22">
-    <img alt="Go version" src="https://img.shields.io/github/go-mod/go-version/emanuelcasco/ocgo">
+    <img alt="Go version" src="https://img.shields.io/github/go-mod/go-version/ulrich-zogo/ocgo">
   </a>
 </div>
 
