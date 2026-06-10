@@ -54,108 +54,22 @@ fi
 
 git push origin "$TAG"
 
-DIST_DIR="dist"
-rm -rf "$DIST_DIR"
-mkdir -p "$DIST_DIR"
+# Build release artifacts using the reusable script.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+"$SCRIPT_DIR/build-release-artifacts.sh" "$TAG"
 
-build_one() {
-  local goos="$1"
-  local goarch="$2"
-  local arch_name="$goarch"
-  if [[ "$goarch" == "amd64" ]]; then
-    arch_name="x86_64"
-  fi
-
-  local dir="$DIST_DIR/${APP_NAME}_${VERSION}_${goos}_${arch_name}"
-  mkdir -p "$dir"
-
-  local bin="$APP_NAME"
-  if [[ "$goos" == "windows" ]]; then
-    bin="$APP_NAME.exe"
-  fi
-
-  echo "Building $goos/$goarch..."
-  CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-    go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$dir/$bin" "$CMD_PATH"
-
-  cp README.md "$dir/" 2>/dev/null || true
-  cp LICENSE "$dir/" 2>/dev/null || true
-
-  tar -C "$DIST_DIR" -czf "$dir.tar.gz" "$(basename "$dir")"
-  rm -rf "$dir"
-}
-
-build_one darwin amd64
-build_one darwin arm64
-build_one linux amd64
-build_one linux arm64
-
-(
-  cd "$DIST_DIR"
-  shasum -a 256 *.tar.gz > checksums.txt
-)
-
+# Create or update the GitHub Release.
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   echo "GitHub release $TAG already exists; uploading artifacts with --clobber."
-  gh release upload "$TAG" "$DIST_DIR"/*.tar.gz "$DIST_DIR/checksums.txt" --repo "$REPO" --clobber
+  gh release upload "$TAG" dist/* --repo "$REPO" --clobber
 else
-  gh release create "$TAG" "$DIST_DIR"/*.tar.gz "$DIST_DIR/checksums.txt" \
+  gh release create "$TAG" dist/* \
     --repo "$REPO" \
     --title "$TAG" \
     --generate-notes
 fi
 
-# Update Homebrew tap formula to install the macOS artifacts.
-TAP_TMP="$(mktemp -d)"
-trap 'rm -rf "$TAP_TMP"' EXIT
-
-gh repo clone "$HOMEBREW_TAP_REPO" "$TAP_TMP" -- --quiet
-mkdir -p "$TAP_TMP/Formula"
-
-DARWIN_ARM_SHA="$(shasum -a 256 "$DIST_DIR/${APP_NAME}_${VERSION}_darwin_arm64.tar.gz" | awk '{print $1}')"
-DARWIN_AMD_SHA="$(shasum -a 256 "$DIST_DIR/${APP_NAME}_${VERSION}_darwin_x86_64.tar.gz" | awk '{print $1}')"
-
-cat > "$TAP_TMP/Formula/${APP_NAME}.rb" <<EOF_FORMULA
-class Ocgo < Formula
-  desc "Run Claude Code through an OpenCode Go-compatible Anthropic proxy"
-  homepage "https://github.com/${REPO}"
-  version "${VERSION}"
-  license "MIT"
-
-  on_macos do
-    if Hardware::CPU.arm?
-      url "https://github.com/${REPO}/releases/download/${TAG}/${APP_NAME}_${VERSION}_darwin_arm64.tar.gz"
-      sha256 "${DARWIN_ARM_SHA}"
-    else
-      url "https://github.com/${REPO}/releases/download/${TAG}/${APP_NAME}_${VERSION}_darwin_x86_64.tar.gz"
-      sha256 "${DARWIN_AMD_SHA}"
-    end
-  end
-
-  def install
-    bin.install "${APP_NAME}"
-  end
-
-  test do
-    system "#{bin}/${APP_NAME}", "--help"
-  end
-end
-EOF_FORMULA
-
-(
-  cd "$TAP_TMP"
-  git add "Formula/${APP_NAME}.rb"
-  if git diff --cached --quiet; then
-    echo "Homebrew formula is already up to date."
-  else
-    git commit -m "Update ${APP_NAME} to ${TAG}"
-    git push
-  fi
-)
-
-TAP_OWNER="${HOMEBREW_TAP_REPO%%/*}"
-TAP_REPO_NAME="${HOMEBREW_TAP_REPO#*/}"
-TAP_NAME="${TAP_REPO_NAME#homebrew-}"
+# Update Homebrew tap formula.
+"$SCRIPT_DIR/update-homebrew-formula.sh" "$TAG" dist/checksums.txt
 
 echo "Release complete: https://github.com/${REPO}/releases/tag/${TAG}"
-echo "Install with: brew install ${TAP_OWNER}/${TAP_NAME}/${APP_NAME}"
