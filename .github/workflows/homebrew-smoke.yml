@@ -1,0 +1,30 @@
+name: homebrew-smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/homebrew-smoke.yml"
+      - "docs/homebrew.md"
+      - "docs/release.md"
+
+jobs:
+  brew-install:
+    runs-on: macos-latest
+    steps:
+      - name: Tap fork-owned Homebrew repo
+        run: brew tap ulrich-zogo/tap https://github.com/ulrich-zogo/homebrew-tap
+
+      - name: Install ocgo
+        run: brew install ocgo
+
+      - name: Verify binary
+        run: |
+          which ocgo
+          ocgo --help
+
+      - name: Verify model catalog
+        run: ocgo models
+
+      - name: Verify doctor
+        run: ocgo doctor || true
