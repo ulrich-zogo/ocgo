@@ -268,6 +268,16 @@ func TestExitCodeForReport(t *testing.T) {
 }
 
 func TestDoctorAgainstLiveProxyReturnsOKForLocalChecks(t *testing.T) {
+	// The doctor checks the codex binary version. On CI
+	// there is no "codex" on PATH, which would make the
+	// codex check an error. Stub the version check so the
+	// test focuses on the proxy checks only.
+	restoreExec := codex.SetExecForTest(
+		func(string) (string, error) { return "/usr/bin/codex", nil },
+		func(string, ...string) ([]byte, error) { return []byte("codex 0.81.0\n"), nil },
+	)
+	defer restoreExec()
+
 	// This test stands up a stub HTTP server that mimics
 	// the OCGO proxy just enough to satisfy the local
 	// endpoint checks. It does not need the real proxy.
@@ -478,6 +488,16 @@ func TestDoctorReportErrorReturnsErrDoctorFailed(t *testing.T) {
 
 func TestDoctorWarningReportDoesNotError(t *testing.T) {
 	redirectAppHome(t)
+	// The codex binary may not be on PATH on CI, which
+	// would make the codex check an error. Stub the
+	// version check so the test asserts that warnings-only
+	// reports do not trigger ErrDoctorFailed.
+	restoreExec := codex.SetExecForTest(
+		func(string) (string, error) { return "/usr/bin/codex", nil },
+		func(string, ...string) ([]byte, error) { return []byte("codex 0.81.0\n"), nil },
+	)
+	defer restoreExec()
+
 	// Run the doctor in --mode cli which produces mainly
 	// warnings (no proxy, no desktop). Warnings should
 	// NOT trigger ErrDoctorFailed.
