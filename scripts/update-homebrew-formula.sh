@@ -34,8 +34,9 @@ TAP_TMP="$(mktemp -d)"
 trap 'rm -rf "$TAP_TMP"' EXIT
 
 if [[ -n "${HOMEBREW_TAP_TOKEN:-}" ]]; then
-  set +x
-  git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git" "$TAP_TMP" --quiet
+  AUTH_HEADER="$(printf "x-access-token:%s" "$HOMEBREW_TAP_TOKEN" | base64 | tr -d '\n')"
+  git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
+    clone "https://github.com/${HOMEBREW_TAP_REPO}.git" "$TAP_TMP" --quiet
 elif command -v gh >/dev/null 2>&1; then
   gh repo clone "$HOMEBREW_TAP_REPO" "$TAP_TMP" -- --quiet
 else
@@ -83,7 +84,9 @@ EOF_FORMULA
   else
     git commit -m "Update ${APP_NAME} to ${TAG}"
     if [[ -n "${HOMEBREW_TAP_TOKEN:-}" ]]; then
-      git push "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git" HEAD:main --quiet
+      AUTH_HEADER="$(printf "x-access-token:%s" "$HOMEBREW_TAP_TOKEN" | base64 | tr -d '\n')"
+      git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
+        push origin HEAD:main --quiet
     else
       git push
     fi

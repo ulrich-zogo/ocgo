@@ -33,7 +33,7 @@ The token must have write access to:
 ulrich-zogo/homebrew-tap
 ```
 
-If the secret is not set, the homebrew update step is skipped.
+If the secret is not set, the release workflow fails before updating the tap.
 
 ## Manual dispatch
 

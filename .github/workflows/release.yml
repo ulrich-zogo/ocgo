@@ -119,18 +119,16 @@ jobs:
           fi
 
       - name: Check HOMEBREW_TAP_TOKEN
-        id: check-token
         shell: bash
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          if [[ -z "${{ secrets.HOMEBREW_TAP_TOKEN }}" ]]; then
-            echo "HOMEBREW_TAP_TOKEN is not set. Homebrew tap update will be skipped."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+          if [[ -z "$HOMEBREW_TAP_TOKEN" ]]; then
+            echo "HOMEBREW_TAP_TOKEN is required to update ulrich-zogo/homebrew-tap." >&2
+            exit 1
           fi
 
       - name: Update Homebrew formula
-        if: steps.check-token.outputs.skip != 'true'
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: ./scripts/update-homebrew-formula.sh "${{ steps.tag.outputs.tag }}" dist/checksums.txt
