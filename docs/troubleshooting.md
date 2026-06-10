@@ -25,8 +25,8 @@ ocgo codex desktop enable chatgpt
 
 If this fails because no backup is available:
 
-- A previous `enable opencode` must have created one. Run `enable opencode` first while Desktop is configured for ChatGPT, then `enable chatgpt` to restore.
-- If no backup exists, reconfigure Codex Desktop manually to use `model_provider = "chatgpt"` in `~/.codex/config.toml`.
+- Do **not** re-run `enable opencode` to create a backup unless Codex Desktop is currently configured for ChatGPT/OpenAI. If Desktop is already in OpenCode mode, `enable opencode` would back up the OpenCode config instead of a real ChatGPT config.
+- Restore `~/.codex/config.toml` manually from a known-good ChatGPT/OpenAI configuration, or reinstall Codex Desktop to regenerate the default config.
 
 ## Codex CLI does not see OpenCode Go models
 
