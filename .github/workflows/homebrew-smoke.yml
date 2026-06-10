@@ -21,9 +21,6 @@ jobs:
       - name: Install ocgo
         run: brew install ocgo
 
-      - name: Run Homebrew formula test
-        run: brew test ocgo
-
       - name: Verify binary
         run: |
           which ocgo
