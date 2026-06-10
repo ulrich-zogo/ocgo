@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -11,6 +12,14 @@ import (
 	"github.com/spf13/cobra"
 	"ocgo/internal/doctor"
 )
+
+// ErrDoctorFailed is returned by runDoctor when the doctor
+// report has one or more error checks. The cobra command's
+// RunE returns it, causing the CLI to exit with a non-zero
+// code (1) after writing the report. The report is written
+// before the error is returned so the user sees the full
+// output.
+var ErrDoctorFailed = errors.New("doctor found errors in the configuration")
 
 // DoctorCmd returns the cobra command for `ocgo doctor`.
 //
@@ -26,15 +35,17 @@ func DoctorCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "doctor [codex]",
-		Short: "Diagnose OCGO, Codex CLI, and Codex Desktop setup",
+		Use:           "doctor [codex]",
+		Short:         "Diagnose OCGO, Codex CLI, and Codex Desktop setup",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: strings.TrimSpace(`
 ocgo doctor runs a series of read-only checks against the
 local OCGO installation, the Codex CLI, and Codex Desktop.
 
-Subcommands:
-  ocgo doctor            Run the full set of checks.
-  ocgo doctor codex      Same as 'ocgo doctor' for now.
+Usage:
+  ocgo doctor
+  ocgo doctor codex
 
 Flags:
   --mode cli|desktop|all Select the scope of the run.
@@ -43,7 +54,18 @@ Flags:
 The doctor never modifies your configuration. If it reports
 an error, follow the remediation hints to fix the issue.
 `),
-		Args: cobra.ArbitraryArgs,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return nil
+			}
+			if len(args) == 1 && args[0] == "codex" {
+				return nil
+			}
+			if len(args) > 0 {
+				return fmt.Errorf("unknown doctor scope %q (supported: codex)", strings.Join(args, " "))
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDoctor(cmd, args, mode, json)
 		},
@@ -67,10 +89,20 @@ func runDoctor(cmd *cobra.Command, args []string, modeFlag string, wantJSON bool
 	_ = args
 	rep := doctor.NewRunner().RunCodex(context.Background(), mode)
 
+	var writeErr error
 	if wantJSON {
-		return writeDoctorJSON(cmd.OutOrStdout(), rep)
+		writeErr = writeDoctorJSON(cmd.OutOrStdout(), rep)
+	} else {
+		writeErr = writeDoctorText(cmd.OutOrStdout(), rep)
 	}
-	return writeDoctorText(cmd.OutOrStdout(), rep)
+	if writeErr != nil {
+		return writeErr
+	}
+
+	if rep.Status == doctor.StatusError {
+		return ErrDoctorFailed
+	}
+	return nil
 }
 
 // writeDoctorJSON serializes the report as compact JSON.

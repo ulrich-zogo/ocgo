@@ -59,9 +59,8 @@ func TestRootRegistersDoctor(t *testing.T) {
 
 func TestDoctorRunNoArgsExecutes(t *testing.T) {
 	redirectAppHome(t)
-	// Make sure the doctor does not panic on an empty home.
 	out, err := executeRoot(t, "doctor")
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrDoctorFailed) {
 		t.Fatalf("ocgo doctor err = %v, output: %s", err, out)
 	}
 	if !strings.Contains(out, "OCGO Doctor") {
@@ -72,7 +71,7 @@ func TestDoctorRunNoArgsExecutes(t *testing.T) {
 func TestDoctorRunWithCodexSubcommandExecutes(t *testing.T) {
 	redirectAppHome(t)
 	out, err := executeRoot(t, "doctor", "codex")
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrDoctorFailed) {
 		t.Fatalf("ocgo doctor codex err = %v, output: %s", err, out)
 	}
 	if !strings.Contains(out, "OCGO Doctor") {
@@ -82,14 +81,37 @@ func TestDoctorRunWithCodexSubcommandExecutes(t *testing.T) {
 
 func TestDoctorModeCLIRunsCLIOnly(t *testing.T) {
 	redirectAppHome(t)
-	out, _ := executeRoot(t, "doctor", "codex", "--mode", "cli")
-	if !strings.Contains(out, "OCGO Doctor") {
-		t.Errorf("output missing banner: %s", out)
+	out, _ := executeRoot(t, "doctor", "codex", "--mode", "cli", "--json")
+	var rep doctor.Report
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("unmarshal: %v; output: %s", err, out)
 	}
-	// The text output groups checks by group. We do not
-	// enforce group names here because the doctor may
-	// evolve; what we care about is that the command did
-	// not fail.
+	// CLI mode must NOT include daemon.*, proxy.*, or
+	// codex.desktop.* checks.
+	for _, c := range rep.Checks {
+		if strings.HasPrefix(c.ID, "daemon.") || strings.HasPrefix(c.ID, "proxy.") || strings.HasPrefix(c.ID, "codex.desktop.") {
+			t.Errorf("CLI mode should not include check %q", c.ID)
+		}
+	}
+	// CLI mode must include core.* and codex.cli.* checks.
+	var hasCoreConfig, hasCoreModel, hasCoreCatalog bool
+	var hasCliBinary bool
+	for _, c := range rep.Checks {
+		switch c.ID {
+		case "core.config":
+			hasCoreConfig = true
+		case "core.model":
+			hasCoreModel = true
+		case "core.catalog":
+			hasCoreCatalog = true
+		case "codex.cli.binary":
+			hasCliBinary = true
+		}
+	}
+	if !hasCoreConfig || !hasCoreModel || !hasCoreCatalog || !hasCliBinary {
+		t.Errorf("CLI mode missing required checks (config=%v model=%v catalog=%v cli=%v)",
+			hasCoreConfig, hasCoreModel, hasCoreCatalog, hasCliBinary)
+	}
 }
 
 func TestDoctorModeDesktopRunsDesktopOnly(t *testing.T) {
@@ -114,7 +136,7 @@ func TestDoctorModeInvalidReturnsError(t *testing.T) {
 func TestDoctorJSONReturnsParseableReport(t *testing.T) {
 	redirectAppHome(t)
 	out, err := executeRoot(t, "doctor", "codex", "--json")
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrDoctorFailed) {
 		t.Fatalf("ocgo doctor codex --json err = %v, output: %s", err, out)
 	}
 	var rep doctor.Report
@@ -318,8 +340,16 @@ func TestDoctorDesktopOpenCodeRequiresHealthyProxy(t *testing.T) {
 		case "/health":
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("ok\n"))
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"minimax-m3","object":"model","created":1,"owned_by":"opencode"}]}`))
+		case "/v1/messages/count_tokens":
+			_, _ = w.Write([]byte(`{"input_tokens":8}`))
+		case "/v1/responses":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"missing model","type":"invalid_request_error"}}`))
 		default:
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer srv.Close()
@@ -376,6 +406,84 @@ func TestDoctorDesktopOpenCodeWithDownProxyIsError(t *testing.T) {
 	}
 	if !hasRequiredCheck {
 		t.Errorf("missing daemon.required_for_desktop check; got %v", rep.Checks)
+	}
+}
+
+// --- args validation ---
+
+func TestDoctorUnknownArgFails(t *testing.T) {
+	redirectAppHome(t)
+	_, err := executeRoot(t, "doctor", "garbage")
+	if err == nil {
+		t.Fatalf("expected error for 'doctor garbage'")
+	}
+	if !strings.Contains(err.Error(), "unknown doctor scope") {
+		t.Errorf("error = %q, want contains 'unknown doctor scope'", err.Error())
+	}
+}
+
+func TestDoctorExtraArgAfterCodexFails(t *testing.T) {
+	redirectAppHome(t)
+	_, err := executeRoot(t, "doctor", "codex", "extra")
+	if err == nil {
+		t.Fatalf("expected error for 'doctor codex extra'")
+	}
+	if !strings.Contains(err.Error(), "unknown doctor scope") {
+		t.Errorf("error = %q, want contains 'unknown doctor scope'", err.Error())
+	}
+}
+
+func TestDoctorCodexArgAcceptsCodex(t *testing.T) {
+	redirectAppHome(t)
+	_, err := executeRoot(t, "doctor", "codex")
+	if err != nil && errors.Is(err, ErrDoctorFailed) {
+		// In an empty HOME the doctor reports errors, which
+		// is the correct behavior. The test only verifies
+		// that the command accepts the "codex" argument and
+		// runs without a cobra-level error. ErrDoctorFailed
+		// is expected in this scenario.
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error for 'doctor codex': %v", err)
+	}
+}
+
+func TestDoctorNoArgsSucceeds(t *testing.T) {
+	redirectAppHome(t)
+	_, err := executeRoot(t, "doctor")
+	if err != nil && errors.Is(err, ErrDoctorFailed) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error for 'doctor': %v", err)
+	}
+}
+
+// --- exit code on error report ---
+
+func TestDoctorReportErrorReturnsErrDoctorFailed(t *testing.T) {
+	redirectAppHome(t)
+	// We expect the doctor to produce errors because no
+	// proxy is running and the empty HOME means config is
+	// missing. The command should return ErrDoctorFailed.
+	_, err := executeRoot(t, "doctor", "codex", "--mode", "all")
+	if err == nil {
+		t.Fatalf("expected error (doctor report has errors)")
+	}
+	if !errors.Is(err, ErrDoctorFailed) {
+		t.Errorf("error = %v, want ErrDoctorFailed", err)
+	}
+}
+
+func TestDoctorWarningReportDoesNotError(t *testing.T) {
+	redirectAppHome(t)
+	// Run the doctor in --mode cli which produces mainly
+	// warnings (no proxy, no desktop). Warnings should
+	// NOT trigger ErrDoctorFailed.
+	out, err := executeRoot(t, "doctor", "codex", "--mode", "cli")
+	if err != nil {
+		t.Fatalf("unexpected error for CLI mode with warnings: %v; output: %s", err, out)
 	}
 }
 
