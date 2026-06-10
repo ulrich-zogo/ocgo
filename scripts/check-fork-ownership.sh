@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Each forbidden string is built from parts so this script
+# never literally contains the upstream owner name.
+a="emanue"
+b="lcasco"
+owner="${a}${b}"
+
 patterns=(
-  "emanuelcasco"
-  "emanuelcasco/tap"
-  "github.com/emanuelcasco"
+  "$owner"
+  "$owner/tap"
+  "github.com/$owner"
 )
+
+exclude_file="check-fork-ownership.sh"
 
 found=false
 for pattern in "${patterns[@]}"; do
-  if grep -RIn \
-    --exclude-dir=.git \
-    --exclude-dir=vendor \
-    --exclude-dir=node_modules \
-    --exclude-dir=dist \
-    --exclude="${0##*/}" \
-    "$pattern" . >&2; then
+  matches=$(find . -type f \
+    -not -path './.git/*' \
+    -not -path '*/vendor/*' \
+    -not -path '*/node_modules/*' \
+    -not -path '*/dist/*' \
+    -not -name "$exclude_file" \
+    -exec grep -In "$pattern" {} + 2>/dev/null || true)
+  if [[ -n "$matches" ]]; then
+    echo "$matches" >&2
     found=true
   fi
 done
