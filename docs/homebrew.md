@@ -62,6 +62,17 @@ The token must have write access to `ulrich-zogo/homebrew-tap`.
 
 See [docs/release.md](release.md) for the full release process.
 
+## Smoke testing
+
+The Homebrew install path is validated by:
+
+```
+.github/workflows/homebrew-smoke.yml
+.github/workflows/release-smoke.yml
+```
+
+The release smoke workflow verifies that the tap points to the requested release tag.
+
 ## Manual validation
 
 ```bash

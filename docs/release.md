@@ -63,6 +63,27 @@ TAG=v0.2.0 make build-release
 TAG=v0.2.0 HOMEBREW_TAP_REPO=ulrich-zogo/homebrew-tap make update-homebrew-formula
 ```
 
+## Post-release smoke test
+
+After publishing a release, run:
+
+```bash
+gh workflow run release-smoke.yml --repo ulrich-zogo/ocgo -f tag=v0.1.0
+gh run watch --repo ulrich-zogo/ocgo
+```
+
+This validates:
+
+- release assets;
+- checksums;
+- archive structure;
+- Homebrew formula;
+- Homebrew installation on macOS.
+
+## Rollback
+
+See [release rollback](release-rollback.md).
+
 ## Artifacts
 
 ```
