@@ -752,12 +752,38 @@ func TestRunCodexDesktopOpenCodeProxyDownIsError(t *testing.T) {
 func TestRunCodexModeOnlyCLI(t *testing.T) {
 	runner, _ := setupRunner(t)
 	rep := runner.RunCodex(context.Background(), ModeCLI)
-	// The CLI mode should include Codex CLI checks but not
-	// Desktop ones.
+	// The CLI mode should include only core checks and codex
+	// CLI checks. It must NOT include daemon.*, proxy.*, or
+	// codex.desktop.* checks.
 	for _, c := range rep.Checks {
-		if strings.HasPrefix(c.ID, "codex.desktop.") {
-			t.Errorf("CLI mode should not include desktop check %q", c.ID)
+		if strings.HasPrefix(c.ID, "daemon.") || strings.HasPrefix(c.ID, "proxy.") || strings.HasPrefix(c.ID, "codex.desktop.") {
+			t.Errorf("CLI mode should not include check %q", c.ID)
 		}
+	}
+	// Verify that core.* and codex.cli.* checks ARE present.
+	var hasCoreConfig, hasCoreModel, hasCoreCatalog bool
+	var hasCliBinary, hasCliProfile, hasCliCatalog bool
+	for _, c := range rep.Checks {
+		switch c.ID {
+		case "core.config":
+			hasCoreConfig = true
+		case "core.model":
+			hasCoreModel = true
+		case "core.catalog":
+			hasCoreCatalog = true
+		case "codex.cli.binary":
+			hasCliBinary = true
+		case "codex.cli.profile":
+			hasCliProfile = true
+		case "codex.cli.catalog":
+			hasCliCatalog = true
+		}
+	}
+	if !hasCoreConfig || !hasCoreModel || !hasCoreCatalog {
+		t.Errorf("CLI mode missing core checks (config=%v, model=%v, catalog=%v)", hasCoreConfig, hasCoreModel, hasCoreCatalog)
+	}
+	if !hasCliBinary || !hasCliProfile || !hasCliCatalog {
+		t.Errorf("CLI mode missing codex CLI checks (binary=%v, profile=%v, catalog=%v)", hasCliBinary, hasCliProfile, hasCliCatalog)
 	}
 }
 

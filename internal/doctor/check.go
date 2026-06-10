@@ -185,29 +185,31 @@ func (r Runner) resolveHostPort() (string, int, error) {
 // (or skipped, depending on the spec).
 func (r Runner) RunCodex(ctx context.Context, mode Mode) Report {
 	if !mode.IsValid() {
-		// Defensive: the command layer validates mode, but
-		// internal callers should not produce a malformed
-		// report.
 		return NewReport([]Check{
 			Error("core.mode", "Doctor mode", "invalid mode: "+string(mode), ""),
 		})
 	}
+
 	core := r.coreChecks(ctx)
-	daemon := r.daemonChecks(ctx, mode)
-	rep := NewReport(append(append([]Check{}, core.Checks...), daemon.Checks...))
+	checks := make([]Check, 0, 50)
+	checks = append(checks, core.Checks...)
+
 	switch mode {
 	case ModeAll:
-		cli := r.codexCLIChecks()
-		desktop := r.codexDesktopChecks()
-		rep = NewReport(append(append(append([]Check{}, rep.Checks...), cli...), desktop...))
+		checks = append(checks, r.daemonChecks(ctx).Checks...)
+		checks = append(checks, r.codexCLIChecks()...)
+		checks = append(checks, r.codexDesktopChecks()...)
 	case ModeCLI:
-		cli := r.codexCLIChecks()
-		rep = NewReport(append(append([]Check{}, rep.Checks...), cli...))
+		// CLI mode does not need the proxy: it talks to
+		// the local OCGO CLI shim through the codex-launch
+		// profile, so daemon/proxy checks and desktop checks
+		// are skipped entirely.
+		checks = append(checks, r.codexCLIChecks()...)
 	case ModeDesktop:
-		desktop := r.codexDesktopChecks()
-		rep = NewReport(append(append([]Check{}, rep.Checks...), desktop...))
+		checks = append(checks, r.daemonChecks(ctx).Checks...)
+		checks = append(checks, r.codexDesktopChecks()...)
 	}
-	return rep
+	return NewReport(checks)
 }
 
 // coreChecks returns the configuration/model/catalog checks
@@ -224,18 +226,10 @@ func (r Runner) coreChecks(ctx context.Context) Report {
 
 // daemonChecks returns the daemon/proxy local-endpoint checks.
 // The status depends on whether Desktop is currently in
-// OpenCode mode (which mandates the proxy is up).
-func (r Runner) daemonChecks(ctx context.Context, mode Mode) Report {
-	if mode == ModeCLI {
-		// CLI mode does not need the proxy: it talks to
-		// the local OCGO CLI shim through the codex-launch
-		// profile. The /v1/messages/count_tokens check
-		// remains useful but is not blocking.
-		checks := []Check{r.checkHealthEndpoint(ctx)}
-		checks = append(checks, r.localEndpointChecks(ctx)...)
-		return Report{Checks: checks}
-	}
-	// all / desktop
+// OpenCode mode (which mandates the proxy is up). This
+// function is called only by RunCodex for ModeDesktop and
+// ModeAll; ModeCLI callers skip daemon checks entirely.
+func (r Runner) daemonChecks(ctx context.Context) Report {
 	checks := []Check{
 		r.checkDaemonStateFile(),
 		r.checkHealthEndpoint(ctx),
