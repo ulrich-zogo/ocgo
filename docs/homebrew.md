@@ -48,6 +48,20 @@ The OCGO release script publishes formula updates to `ulrich-zogo/homebrew-tap` 
 HOMEBREW_TAP_REPO=ulrich-zogo/homebrew-tap
 ```
 
+## Automated updates
+
+The release workflow updates this tap automatically when a `v*` tag is pushed.
+
+Required secret in `ulrich-zogo/ocgo`:
+
+```text
+HOMEBREW_TAP_TOKEN
+```
+
+The token must have write access to `ulrich-zogo/homebrew-tap`.
+
+See [docs/release.md](release.md) for the full release process.
+
 ## Manual validation
 
 ```bash

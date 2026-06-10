@@ -1,4 +1,4 @@
-.PHONY: build run test clean install release
+.PHONY: build run test clean install release check-fork-ownership build-release update-homebrew-formula ci
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 EXE := $(shell go env GOEXE)
@@ -13,11 +13,16 @@ build:
 run:
 	go run ./cmd/ocgo
 
-test:
+test: check-fork-ownership
 	go test ./...
 
+ci: check-fork-ownership
+	go vet ./...
+	go test ./...
+	go build ./cmd/ocgo
+
 clean:
-	rm -rf bin
+	rm -rf bin dist
 
 install: build
 	mkdir -p "$(INSTALL_DIR)"
@@ -29,3 +34,11 @@ check-fork-ownership:
 release:
 	@[ -n "$(TAG)" ] || (echo "Usage: make release TAG=v0.1.0" && exit 1)
 	./scripts/release.sh "$(TAG)"
+
+build-release:
+	@[ -n "$(TAG)" ] || (echo "Usage: make build-release TAG=v0.2.0" && exit 1)
+	./scripts/build-release-artifacts.sh "$(TAG)"
+
+update-homebrew-formula:
+	@[ -n "$(TAG)" ] || (echo "Usage: make update-homebrew-formula TAG=v0.2.0" && exit 1)
+	./scripts/update-homebrew-formula.sh "$(TAG)" dist/checksums.txt
