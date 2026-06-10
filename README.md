@@ -121,7 +121,32 @@ ocgo ls
 ocgo models
 ```
 
-All three commands are equivalent. The output shows the 18+ models available through OpenCode Go.
+All three commands are equivalent. Each invocation always fetches the latest catalog from the official OpenCode Go API.
+
+Current models (as of this writing):
+
+```
+minimax-m3
+minimax-m2.7
+minimax-m2.5
+kimi-k2.6
+kimi-k2.5
+glm-5.1
+glm-5
+deepseek-v4-pro
+deepseek-v4-flash
+qwen3.7-max
+qwen3.7-plus
+qwen3.6-plus
+qwen3.5-plus
+mimo-v2-pro
+mimo-v2-omni
+mimo-v2.5-pro
+mimo-v2.5
+hy3-preview
+```
+
+The list can evolve — run `ocgo models` for the current local catalog.
 
 ### Set a default model
 
@@ -140,16 +165,30 @@ ocgo fetches the official OpenCode Go model list on first use and caches it loca
 
 ### Model mapping
 
-Optional model name routing lets you map a tool-specific name to a different OpenCode Go model:
+Optional model name routing lets you map a tool-specific name to a different OpenCode Go model. This is useful when a client hardcodes a model name like `claude-sonnet-4-20250514` and you want it to use a specific OpenCode Go model instead.
 
 ```bash
-ocgo mapping claude set claude-sonnet kimi-k2.6
-ocgo mapping codex set gpt-5.5 deepseek-v4-pro
 ocgo mapping claude show
 ocgo mapping codex show
+
+ocgo mapping claude get claude-sonnet
+ocgo mapping claude set claude-sonnet minimax-m3
+ocgo mapping claude unset claude-sonnet
+
+ocgo mapping codex get gpt-5
+ocgo mapping codex set gpt-5 deepseek-v4-pro
+ocgo mapping codex unset gpt-5
+
+ocgo mapping claude open
+ocgo mapping codex open
 ```
 
-Mappings are stored in `~/.config/ocgo/model-mapping.json`. See the [README from earlier versions](#) for full mapping command details.
+- `get <source-model>` — show the current mapping for one model.
+- `set <source-model> <opencode-model>` — create or update a mapping.
+- `unset` (aliases: `rm`, `remove`, `delete`) — remove a mapping.
+- `open` — edit the mapping file in `$EDITOR`.
+
+Mappings are stored in `~/.config/ocgo/model-mapping.json`.
 
 ## Claude Code
 
