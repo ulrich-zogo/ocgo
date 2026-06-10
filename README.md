@@ -73,23 +73,6 @@ ocgo doctor codex
 
 ## Installation
 
-### Homebrew
-
-For macOS users, the upstream formula is available via the official tap:
-
-```bash
-brew install emanuelcasco/tap/ocgo
-```
-
-Or tap first:
-
-```bash
-brew tap emanuelcasco/tap
-brew install ocgo
-```
-
-> This fork (`ulrich-zogo/ocgo`) does not maintain its own Homebrew tap. To build from source instead, see below.
-
 ### Build from source
 
 ```bash
@@ -98,6 +81,29 @@ cd ocgo
 make build       # builds bin/ocgo
 make install     # installs to ~/go/bin
 ```
+
+The binary is built at `bin/ocgo`. `make install` copies it to `~/go/bin/ocgo`. Make sure `~/go/bin` is in your `PATH`:
+
+```bash
+export PATH="$HOME/go/bin:$PATH"
+```
+
+### Homebrew
+
+A dedicated Homebrew tap is expected at `ulrich-zogo/homebrew-tap`. After the tap repository exists and the formula has been published, install with:
+
+```bash
+brew tap ulrich-zogo/tap
+brew install ocgo
+```
+
+or:
+
+```bash
+brew install ulrich-zogo/tap/ocgo
+```
+
+Until the tap is published, use the source build above. See [docs/homebrew.md](docs/homebrew.md) for details on creating and publishing the tap repository.
 
 ## Setup
 
@@ -125,7 +131,7 @@ ocgo ls
 ocgo models
 ```
 
-All three commands are equivalent. Each invocation always fetches the latest catalog from the official OpenCode Go API.
+All three commands are equivalent. `ocgo models` resolves the catalog from the official OpenCode Go source when available, then the local cache, then the built-in fallback list.
 
 Current models (as of this writing):
 
