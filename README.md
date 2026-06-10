@@ -75,6 +75,8 @@ ocgo doctor codex
 
 ### Homebrew
 
+For macOS users, the upstream formula is available via the official tap:
+
 ```bash
 brew install emanuelcasco/tap/ocgo
 ```
@@ -85,6 +87,8 @@ Or tap first:
 brew tap emanuelcasco/tap
 brew install ocgo
 ```
+
+> This fork (`ulrich-zogo/ocgo`) does not maintain its own Homebrew tap. To build from source instead, see below.
 
 ### Build from source
 
