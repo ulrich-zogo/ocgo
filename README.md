@@ -1,12 +1,12 @@
 <h1 align="center">ocgo</h1>
 <div align="center">
-  <a href="https://github.com/emanuelcasco/ocgo/releases">
+  <a href="https://github.com/ulrich-zogo/ocgo/releases">
     <img alt="GitHub release" src="https://img.shields.io/github/v/release/emanuelcasco/ocgo?color=blue">
   </a>
-  <a href="https://github.com/emanuelcasco/ocgo/releases">
+  <a href="https://github.com/ulrich-zogo/ocgo/releases">
     <img alt="GitHub downloads" src="https://img.shields.io/github/downloads/emanuelcasco/ocgo/total">
   </a>
-  <a href="https://github.com/emanuelcasco/ocgo/blob/main/LICENSE">
+  <a href="https://github.com/ulrich-zogo/ocgo/blob/main/LICENSE">
     <img alt="GitHub license" src="https://img.shields.io/github/license/emanuelcasco/ocgo">
   </a>
   <a href="https://go.dev/doc/go1.22">
@@ -22,250 +22,187 @@
 
 <br/>
 
-
 <div align="center">
-  <a href="https://github.com/emanuelcasco/ocgo">ocgo</a> is a small Go CLI for using your OpenCode Go subscription from Claude Code or Codex CLI in one command — no manual proxy setup required.
-  <br/>
-  <br/>
-  🤖 <em>Claude Code support.</em>  🧠 <em>Codex CLI support.</em> ⚡ <em>Local compatibility proxy.</em>
+  <a href="https://github.com/ulrich-zogo/ocgo">ocgo</a> starts a local Anthropic/OpenAI-compatible proxy that lets Claude Code, Codex CLI, and Codex Desktop use an OpenCode Go subscription.
 </div>
 
-## Why `ocgo`?
+## What ocgo does
 
-`ocgo` is a small Go CLI that lets [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex CLI](https://developers.openai.com/codex/cli/) run against an OpenCode Go subscription. It starts a local compatibility proxy, translates Claude Code's Anthropic Messages API requests when needed, exposes OpenAI-compatible endpoints for Codex, and launches tools with the right configuration.
+ocgo starts a local proxy that translates requests from your AI coding tools into OpenCode Go API calls.
 
-```bash
-# 1. Setup your OpenCode API key
-ocgo setup
+- **Claude Code** uses the Anthropic Messages API proxy (`/v1/messages`).
+- **Codex CLI** uses the OpenAI Chat Completions and Responses API proxy (`/v1/chat/completions`, `/v1/responses`).
+- **Codex Desktop** uses the same proxy through a configurable provider.
+- Your real OpenCode Go API key stays in the local config. Clients receive a fake key like `ocgo` or `unused`.
 
-# 2. Start coding!
-ocgo launch claude --model kimi-k2.6
-ocgo launch codex --model kimi-k2.6
-```
+## Supported clients
 
-Use your OpenCode Go subscription from Claude Code or Codex CLI in one command — no manual proxy setup required.
-
-## Features
-
-- Save and reuse your OpenCode Go API key.
-- List known OpenCode Go model IDs.
-- Run Claude Code through OpenCode Go with one command.
-- Run Codex CLI through OpenCode Go with one command.
-- Map Claude Code or Codex model names to OpenCode Go models when you want transparent model routing.
-- Start, stop, and inspect a local proxy server.
-- Exposes Anthropic-compatible and OpenAI-compatible local API layers.
-- Supports streaming text responses and basic tool-call translation.
+- Claude Code (Anthropic Messages API)
+- Codex CLI (OpenAI Chat Completions / Responses API)
+- Codex Desktop (OpenAI Responses API via `ocgo-desktop` provider)
 
 ## Requirements
 
-- Go 1.22 or newer.
-- A valid OpenCode Go API key.
-- Claude Code or Codex CLI installed and available.
+- Go 1.22 or newer (to build from source)
+- A valid OpenCode Go API key
+- Claude Code, Codex CLI, or Codex Desktop installed (depending on your workflow)
+
+## Quick start
+
+```bash
+# 1. Save your API key
+ocgo setup
+
+# 2. Pick a default OpenCode Go model
+ocgo list
+ocgo opencode model set-default minimax-m3
+
+# 3a. Launch Claude Code
+ocgo launch claude --model minimax-m3
+
+# 3b. Or launch Codex CLI
+ocgo launch codex --model minimax-m3
+
+# 3c. Or set up Codex Desktop (needs the daemon)
+ocgo daemon start
+ocgo codex desktop enable opencode --model minimax-m3
+
+# 4. Diagnose any issues
+ocgo doctor codex
+```
 
 ## Installation
 
-Install with Homebrew:
+### Homebrew
 
 ```bash
 brew install emanuelcasco/tap/ocgo
 ```
 
-Or tap the repository first:
+Or tap first:
 
 ```bash
 brew tap emanuelcasco/tap
 brew install ocgo
 ```
 
-Build from source:
+### Build from source
 
 ```bash
-git clone https://github.com/emanuelcasco/ocgo.git
+git clone https://github.com/ulrich-zogo/ocgo.git
 cd ocgo
-make install
+make build       # builds bin/ocgo
+make install     # installs to ~/go/bin
 ```
 
-## Configuration
-
-Run setup and paste your OpenCode Go API key when prompted:
+## Setup
 
 ```bash
 ocgo setup
 ```
 
-Or pass the key directly:
+Paste your OpenCode Go API key when prompted, or pass it directly:
 
 ```bash
 ocgo setup --api-key sk-opencode-your-key
 ```
 
-Configuration is saved to:
+The API key can also be provided at runtime via the `OCGO_API_KEY` environment variable.
 
-```text
-~/.config/ocgo/config.json
-```
+Configuration is saved to `~/.config/ocgo/config.json`. See [docs/configuration.md](docs/configuration.md) for details.
 
-You can also provide the key at runtime with an environment variable:
-
-```bash
-export OCGO_API_KEY=sk-opencode-your-key
-```
-
-By default, the local proxy listens on `127.0.0.1:3456`.
-
-## Usage
+## Models
 
 ### List available models
 
 ```bash
 ocgo list
-```
-
-Aliases are also available:
-
-```bash
 ocgo ls
 ocgo models
 ```
 
-### Map tool models to OpenCode Go models
+All three commands are equivalent. The output shows the 18+ models available through OpenCode Go.
 
-`ocgo` can route model names used by Claude Code or Codex to OpenCode Go models. Mappings are empty by default; add only the routes you want. The mapping is stored in:
-
-```text
-~/.config/ocgo/model-mapping.json
-```
-
-Show the current mapping for a tool:
+### Set a default model
 
 ```bash
+ocgo opencode model set-default minimax-m3
+ocgo opencode model current
+```
+
+The default model is shared across `launch claude`, `launch codex`, and `codex desktop enable opencode`. When no default is configured, the first model in the catalog is used as a fallback.
+
+A `--model` flag on any launch command overrides the default for that session.
+
+### Model catalog
+
+ocgo fetches the official OpenCode Go model list on first use and caches it locally in `~/.config/ocgo/model-catalog-cache.json`. If the official source is unreachable, ocgo uses the cache, then falls back to a built-in list of known models.
+
+### Model mapping
+
+Optional model name routing lets you map a tool-specific name to a different OpenCode Go model:
+
+```bash
+ocgo mapping claude set claude-sonnet kimi-k2.6
+ocgo mapping codex set gpt-5.5 deepseek-v4-pro
 ocgo mapping claude show
 ocgo mapping codex show
 ```
 
-Get, set, or remove one mapping:
+Mappings are stored in `~/.config/ocgo/model-mapping.json`. See the [README from earlier versions](#) for full mapping command details.
 
-```bash
-ocgo mapping claude get claude-sonnet-4-5
-ocgo mapping claude set claude-sonnet-4-5 kimi-k2.6
-ocgo mapping claude unset claude-sonnet-4-5
-ocgo mapping codex set gpt-5 deepseek-v4-pro
-ocgo mapping codex rm gpt-5
-```
+## Claude Code
 
-Open the mapping file in `$EDITOR`:
-
-```bash
-ocgo mapping claude open
-ocgo mapping codex open
-```
-
-Exact mappings take precedence. For Claude, family mappings such as `claude-sonnet` can also match versioned names such as `claude-sonnet-4-5` when no exact entry exists.
-
-#### Claude mapping
-
-Claude Code primarily shows Claude/Anthropic models in its `/model` picker. It can show a single custom model in some launch modes, but `ocgo` cannot reliably inject the full OpenCode Go model catalog into Claude Code's picker.
-
-For Claude Code, mappings are useful to make Claude's usual aliases or model names resolve to the OpenCode Go models you prefer, without switching models every session:
-
-```bash
-ocgo mapping claude set claude-sonnet kimi-k2.6
-ocgo mapping claude set claude-opus deepseek-v4-pro
-ocgo mapping claude show
-```
-
-With the `claude-sonnet` family mapping above, requests for versioned Sonnet names also route to the same target unless an exact mapping exists:
-
-```text
-claude-sonnet-4-5 -> kimi-k2.6
-```
-
-When launching Claude, `ocgo` prints the active mapping and exports Claude's default model environment variables only for configured routes.
-
-#### Codex mapping
-
-Codex is different: `ocgo` can already provide a model catalog to Codex through `~/.codex/ocgo-models.json`, so OpenCode Go models can appear directly in Codex's model selection UI.
-
-For Codex, mappings are mostly useful for compatibility with prompts, scripts, tools, or existing config that still request original Codex/OpenAI model names. For example:
-
-```bash
-ocgo mapping codex set gpt-5.5 deepseek-v4-pro
-```
-
-Then a request for `gpt-5.5` is routed to `deepseek-v4-pro`. Mapped aliases are also included in the generated Codex model catalog so they can appear alongside OpenCode Go model IDs.
-
-### Launch Claude Code
-
-Start Claude Code through the local proxy:
+### Launch
 
 ```bash
 ocgo launch claude
-```
-
-Use a specific OpenCode Go model:
-
-```bash
-ocgo launch claude --model kimi-k2.6
-```
-
-Pass arguments through to Claude Code after `--`:
-
-```bash
-ocgo launch claude --model kimi-k2.6 -- -p "How does this repository work?"
-```
-
-Allow Claude Code to skip permission prompts:
-
-```bash
+ocgo launch claude --model minimax-m3
 ocgo launch claude --yes
+ocgo launch claude --model minimax-m3 -- -p "Explain this repository"
 ```
 
-When `ocgo launch claude` starts Claude Code, it sets:
+### Environment variables
+
+When starting Claude Code, ocgo sets:
 
 ```bash
 ANTHROPIC_BASE_URL=http://127.0.0.1:3456
 ANTHROPIC_AUTH_TOKEN=unused
 ```
 
-When `--model` is provided, it also sets:
+With `--model`:
 
 ```bash
-ANTHROPIC_MODEL=<model>
-ANTHROPIC_SMALL_FAST_MODEL=<model>
+ANTHROPIC_MODEL=minimax-m3
+ANTHROPIC_SMALL_FAST_MODEL=minimax-m3
 ```
 
-If Claude Code requests a Claude model name, `ocgo` routes the request through `ocgo mapping claude`. Unmapped model names pass through unchanged. `ocgo launch claude` prints the active mapping before starting Claude Code.
+Requests for Claude/Anthropic model names are routed through any configured mapping. Unmapped names pass through unchanged.
 
-### Launch Codex CLI
+## Codex CLI
 
-Start Codex CLI through the local proxy:
+### Launch
 
 ```bash
 ocgo launch codex
+ocgo launch codex --model minimax-m3
+ocgo launch codex -- --sandbox workspace-write
 ```
 
-Use a specific OpenCode Go model:
-
-```bash
-ocgo launch codex --model kimi-k2.6
-```
-
-Pass arguments through to Codex after `--`:
-
-```bash
-ocgo launch codex --model kimi-k2.6 -- --sandbox workspace-write
-```
-
-Configure Codex without launching it:
+### Configure without launching
 
 ```bash
 ocgo launch codex --config
 ```
 
-When `ocgo launch codex` runs, it writes or updates the `ocgo-launch` Codex profile. For newer Codex versions it writes `~/.codex/ocgo-launch.config.toml`; for compatibility with older Codex versions it also writes legacy profile sections in `~/.codex/config.toml`:
+This writes the `ocgo-launch` profile and model catalog without starting Codex.
+
+### What gets written
+
+`~/.codex/ocgo-launch.config.toml`:
 
 ```toml
-[profiles.ocgo-launch]
 openai_base_url = "http://127.0.0.1:3456/v1/"
 forced_login_method = "api"
 model_provider = "ocgo-launch"
@@ -277,166 +214,243 @@ base_url = "http://127.0.0.1:3456/v1/"
 wire_api = "responses"
 ```
 
-It then launches:
+`~/.codex/ocgo-models.json` contains metadata for every known OpenCode Go model. Codex receives `OPENAI_API_KEY=ocgo` so all requests route through the local proxy.
+
+### Run from terminal
+
+After configuration:
 
 ```bash
-codex --profile ocgo-launch -m <model>
+codex --profile ocgo-launch -m minimax-m3
 ```
 
-The Codex process receives `OPENAI_API_KEY=ocgo`; the local proxy injects your real OpenCode Go API key upstream. `ocgo` also writes `~/.codex/ocgo-models.json` so Codex has metadata for OpenCode Go model IDs such as `deepseek-v4-pro`.
+## Codex Desktop
 
-Codex model names can be routed through `ocgo mapping codex`. Mapped Codex aliases are included in the generated `~/.codex/ocgo-models.json` catalog so they can appear alongside OpenCode Go models.
+Desktop mode lets Codex Desktop (the macOS/Windows GUI app) use OpenCode Go through the local proxy. Unlike Codex CLI, Desktop does not launch ocgo itself — the daemon must be running.
 
-## Proxy commands
-
-Run the proxy in the foreground:
+### Prerequisites
 
 ```bash
-ocgo serve
+ocgo setup
+ocgo opencode model set-default minimax-m3
+ocgo daemon start
 ```
 
-Run it in the background:
+### Enable OpenCode mode
 
 ```bash
-ocgo serve --background
-# or
-ocgo serve -b
+ocgo codex desktop enable opencode
+ocgo codex desktop enable opencode --model minimax-m3
 ```
 
-Check whether the proxy is running:
+This:
+
+1. Backs up the existing `~/.codex/config.toml` to `~/.config/ocgo/codex-backups/`.
+2. Writes an OCGO Desktop provider with `model_provider = "ocgo-desktop"` and `wire_api = "responses"`.
+3. Records the OpenCode state in `~/.config/ocgo/codex-desktop-state.json`.
+
+### Check status
 
 ```bash
-ocgo status
+ocgo codex desktop status
+ocgo doctor codex --mode desktop
 ```
 
-Stop the background proxy:
+### Return to ChatGPT / OpenAI
 
 ```bash
-ocgo stop
+ocgo codex desktop enable chatgpt
 ```
 
-Proxy runtime files are stored in:
+This restores the previous `~/.codex/config.toml` from the backup created by `enable opencode`. The backup is preserved so you can switch back and forth.
 
-```text
+### Full Desktop workflow
+
+```bash
+# Initial setup
+ocgo setup
+ocgo opencode model set-default minimax-m3
+ocgo daemon start
+ocgo codex desktop enable opencode
+ocgo doctor codex --mode desktop
+
+# Later, to revert
+ocgo codex desktop enable chatgpt
+```
+
+## Daemon
+
+ocgo provides two proxy-running mechanisms:
+
+| Command | Use case |
+|---|---|
+| `ocgo serve` | Foreground proxy (previous behavior) |
+| `ocgo serve --background` | Background proxy (legacy) |
+| `ocgo daemon start` | Background daemon (recommended for Desktop) |
+| `ocgo daemon status` | Daemon health check |
+| `ocgo daemon stop` | Stop the daemon |
+| `ocgo daemon restart` | Restart the daemon |
+
+The daemon is the recommended mode for Codex Desktop because Desktop needs the proxy to stay up across sessions. `ocgo daemon status` checks both the `/health` endpoint and the daemon state file.
+
+### Daemon files
+
+```
+~/.config/ocgo/daemon-state.json
 ~/.config/ocgo/ocgo.pid
 ~/.config/ocgo/ocgo.log
 ```
 
+## Doctor
+
+The doctor is a read-only diagnostic tool:
+
+```bash
+ocgo doctor
+ocgo doctor codex
+ocgo doctor codex --mode cli
+ocgo doctor codex --mode desktop
+ocgo doctor codex --json
+```
+
+It checks:
+
+- OCGO configuration and API key
+- Model selection and catalog
+- Daemon state and health endpoint
+- Local proxy endpoints (`/v1/models`, `/v1/messages/count_tokens`, `/v1/responses`)
+- Codex CLI binary, profile, and model catalog
+- Codex Desktop config, state, and backup
+
+The doctor never modifies files, never starts the daemon, and never switches the Desktop provider.
+
+Exit codes: `0` = ok or warning; `1` = at least one error.
+
+## Remote Codex
+
+ocgo's proxy listens on `127.0.0.1:3456` by default. When Codex CLI runs on the same machine, this works as-is.
+
+If Codex CLI runs in a container, VM, or cloud workspace, `127.0.0.1` refers to the remote environment, not your local machine. Options:
+
+- Run ocgo inside the same remote environment.
+- Change the proxy to listen on `0.0.0.0` and connect via LAN IP.
+- Use an SSH tunnel or VPN to forward the port.
+
+> **Warning:** Do not expose the proxy to the public internet. The proxy uses your OpenCode Go API key and has no authentication of its own.
+
+For LAN access, set `~/.config/ocgo/config.json`:
+
+```json
+{
+  "api_key": "sk-opencode-...",
+  "host": "0.0.0.0",
+  "port": 3456
+}
+```
+
+Then in the remote Codex profile, set `openai_base_url = "http://<HOST_IP>:3456/v1/"`.
+
+## Configuration files
+
+See [docs/configuration.md](docs/configuration.md) for a complete reference of configuration files, their locations, and formats.
+
+## Proxy API
+
+The local proxy exposes these endpoints:
+
+| Endpoint | Method | Used by | Notes |
+|---|---|---|---|
+| `/health` | GET | Monitoring, doctor | Returns `ok` |
+| `/v1/messages` | POST | Claude Code | Anthropic Messages → OpenCode Go → Anthropic-shaped response |
+| `/v1/messages/count_tokens` | POST | All clients | Local approximate token count, no upstream call |
+| `/v1/chat/completions` | POST | Codex CLI | OpenAI-compatible passthrough with API key injection |
+| `/v1/responses` | POST | Codex CLI, Desktop | OpenAI Responses API adapter (chat completion bridge) |
+| `/v1/models` | GET | All clients | Local model list from catalog/cache/fallback |
+
+- `/v1/messages/count_tokens` is computed locally using character-based heuristics. It is deterministic and non-zero for any meaningful input, but it is not byte-compatible with any proprietary tokenizer.
+- `/v1/responses` validates requests locally (empty bodies return 4xx) before forwarding valid requests upstream.
+- `/v1/models` uses the official OpenCode Go catalog when available, falls back to the cached version, then falls back to a built-in list.
+
+## Troubleshooting
+
+See [docs/troubleshooting.md](docs/troubleshooting.md) for detailed troubleshooting of:
+
+- Codex Desktop not responding
+- Returning to ChatGPT / OpenAI
+- Codex CLI not seeing models
+- Invalid model errors
+- Proxy unreachable
+- Remote Codex (container / VM / cloud workspace)
+- Token counting inconsistencies
+- Doctor diagnostics
+
 ## Development
 
-### Set up a local development environment
-
-Clone the repository and enter the project directory:
+### Build
 
 ```bash
-git clone <repository-url>
-cd ocgo-cc
-```
-
-Install Go 1.22 or newer, then download dependencies:
-
-```bash
-go mod download
-```
-
-Build the binary:
-
-```bash
-make build
-```
-
-The binary is written to:
-
-```text
-bin/ocgo
-```
-
-Optionally install it to `~/go/bin`:
-
-```bash
-make install
-```
-
-Make sure the install location is in your `PATH`:
-
-```bash
-export PATH="$HOME/go/bin:$PATH"
-```
-
-Configure an OpenCode Go API key for local testing:
-
-```bash
-bin/ocgo setup
-# or, if installed:
-ocgo setup
-```
-
-Run the CLI without building:
-
-```bash
-make run
-```
-
-Run tests:
-
-```bash
+make build       # bin/ocgo
+make install     # ~/go/bin/ocgo
 make test
-```
-
-Remove built binaries:
-
-```bash
+make run
 make clean
 ```
 
-## Release
+### Prerequisites
 
-This project includes a plain Bash release script, no GoReleaser required. It uses the GitHub CLI to create the GitHub release and update a Homebrew tap formula.
-
-Requirements:
-
-```bash
-brew install gh
-gh auth login
-```
-
-Release a new version:
+- Go 1.22+
+- A valid OpenCode Go API key for testing
 
 ```bash
-make release TAG=v0.1.0
+git clone https://github.com/ulrich-zogo/ocgo.git
+cd ocgo
+go mod download
+make build
+bin/ocgo setup
 ```
 
-By default, releases are published to `emanuelcasco/ocgo` and the Homebrew formula is pushed to `emanuelcasco/homebrew-tap`. You can override those with `GITHUB_REPOSITORY=owner/repo` and `HOMEBREW_TAP_REPO=owner/homebrew-tap`.
+### Release
 
-The script builds macOS/Linux `amd64` and `arm64` archives, uploads them to GitHub Releases, and commits `Formula/ocgo.rb` to the tap repo.
-
-## How it works
-
-`ocgo` exposes a local compatibility API used by Claude Code and Codex CLI:
-
-- `GET /health`
-- `POST /v1/messages`
-- `POST /v1/messages/count_tokens`
-- `POST /v1/chat/completions`
-- `POST /v1/responses`
-
-Requests sent to `/v1/messages` are converted from Anthropic Messages format into OpenAI-compatible chat completion requests.
-
-Requests sent to `/v1/chat/completions` are passed through as OpenAI-compatible chat completion requests while `ocgo` injects the configured OpenCode Go API key.
-
-Requests sent to `/v1/responses` use a lightweight OpenAI Responses API adapter for Codex CLI. The adapter converts common Responses input, tool definitions, and streaming text events to and from chat completions.
-
-All upstream requests are forwarded to:
-
-```text
-https://opencode.ai/zen/go/v1/chat/completions
+```bash
+make release TAG=v0.2.0
 ```
 
-Claude Code responses are converted back into Anthropic-compatible responses. Codex responses are returned in OpenAI-compatible Chat Completions or Responses API shapes depending on the requested endpoint.
+Requires `gh` (GitHub CLI) for creating releases and updating the Homebrew formula.
+
+## Upgrading from earlier versions
+
+```bash
+# Refresh the model catalog
+ocgo list
+
+# Choose a default shared model
+ocgo opencode model set-default minimax-m3
+
+# Regenerate Codex CLI profile
+ocgo launch codex --config
+
+# Restart the daemon
+ocgo daemon restart
+
+# Re-enable Desktop OpenCode mode
+ocgo codex desktop enable opencode
+
+# Verify everything
+ocgo doctor codex
+```
+
+Changes to note:
+
+- If you previously used `serve --background`, you can keep it for CLI workflows, but use `daemon start` for Codex Desktop.
+- If you hardcoded `kimi-k2.6` as a model, switch to the shared default model selection.
+- Model mappings remain optional.
 
 ## Limitations
 
-`ocgo` is intentionally lightweight. Token counting currently returns `0`, and Anthropic/OpenAI compatibility is focused on the request and response shapes needed by Claude Code and Codex CLI rather than full API parity. The `/v1/responses` adapter is minimal and targets text/tool workflows used by Codex; it is not a complete OpenAI Responses API implementation.
+- Token counting is local and approximate. It does not attempt to reproduce any proprietary tokenizer.
+- The `/v1/responses` adapter targets the text and tool-call workflows used by Codex. It is not a full OpenAI Responses API implementation.
+- Codex Desktop requires the local daemon to be actively running.
+- Tool calls and streaming are supported in the workflows covered by Claude Code and Codex CLI, but not every edge case of every upstream API is tested.
 
 ## License
 
