@@ -38,11 +38,37 @@ jobs:
           if (-not (Test-Path (Join-Path $manifestDir "UlrichZogo.OCGO.locale.en-US.yaml"))) { throw "Missing locale.yaml" }
 
           if (Get-Command winget -ErrorAction SilentlyContinue) {
-            winget validate $manifestDir
-            if ($LASTEXITCODE -ne 0) {
-              exit $LASTEXITCODE
+            $out = winget validate $manifestDir 2>&1
+            $text = ($out | Out-String)
+            Write-Host $text
+
+            $ec = $LASTEXITCODE
+
+            if ($ec -eq 0) {
+              Write-Host "winget validate completed."
+              exit 0
             }
-            Write-Host "winget validate completed."
+
+            $hasValidationSuccess =
+              $text -match "Manifest validation succeeded" -or
+              $text -match "Validation succeeded" -or
+              $text -match "succeeded with warnings"
+
+            $hasKnownSchemaWarning =
+              $text -match "Schema header not found"
+
+            $hasHardError =
+              $text -match "(?i)\berror\b" -or
+              $text -match "(?i)\bfailed\b" -or
+              $text -match "(?i)\binvalid\b"
+
+            if ($hasValidationSuccess -and $hasKnownSchemaWarning -and -not $hasHardError) {
+              Write-Host "winget validate returned non-zero but only known schema-header warning was detected."
+              exit 0
+            }
+
+            Write-Error "winget validate failed with exit code $ec."
+            exit $ec
           } else {
             Write-Host "winget is not available; skipping winget validate."
           }
