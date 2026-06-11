@@ -22,7 +22,7 @@ jobs:
 
       - name: Test Windows installer
         shell: pwsh
-        run: ./scripts/test-install-windows.ps1
+        run: ./scripts/test-install-windows.ps1 -AllowMissingVersion
 
       - name: Validate Scoop manifest JSON
         shell: pwsh

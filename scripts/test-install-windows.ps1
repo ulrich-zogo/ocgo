@@ -1,3 +1,7 @@
+param(
+    [switch]$AllowMissingVersion
+)
+
 $ErrorActionPreference = "Stop"
 
 $TempRoot = Join-Path $env:TEMP ("ocgo-install-test-" + [Guid]::NewGuid().ToString())
@@ -38,20 +42,30 @@ try {
 
     Write-Host "Running ocgo version ..."
     $versionOutput = & $exePath version 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    if ($LASTEXITCODE -ne 0) {
+        if ($AllowMissingVersion) {
+            Write-Host "  (version command not available in this release)"
+        } else {
+            Write-Error "ocgo version exited with code $LASTEXITCODE"
+            exit 1
+        }
+    } else {
         Write-Host $versionOutput
         Write-Host "  OK"
 
         Write-Host "Running ocgo version --json ..."
         $jsonOutput = & $exePath version --json 2>&1
-        if ($LASTEXITCODE -eq 0) {
+        if ($LASTEXITCODE -ne 0) {
+            if ($AllowMissingVersion) {
+                Write-Host "  (version --json not available in this release)"
+            } else {
+                Write-Error "ocgo version --json exited with code $LASTEXITCODE"
+                exit 1
+            }
+        } else {
             $jsonOutput | ConvertFrom-Json | Out-Null
             Write-Host "  OK"
-        } else {
-            Write-Host "  (version --json not available in this release)"
         }
-    } else {
-        Write-Host "  (version command not available in this release)"
     }
 
     Write-Host ""

@@ -112,7 +112,7 @@ for file in "${expected[@]}"; do
       verify_extracted_dir "$target" "$APP_NAME"
       local bin_path="$(find "$target" -type f -name "$APP_NAME" | head -1)"
       if [[ -n "$bin_path" ]]; then
-        check_version "$bin_path" || true
+        check_version "$bin_path"
       fi
       echo "  Extracted and verified: $file"
       ;;

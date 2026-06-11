@@ -57,8 +57,13 @@ jobs:
         run: |
           which ocgo
           ocgo --help
-          ocgo version || true
-          ocgo version --json || true
+          if [ "${{ inputs.tag }}" = "v0.1.0" ]; then
+            ocgo version || true
+            ocgo version --json || true
+          else
+            ocgo version
+            ocgo version --json
+          fi
 
       - name: Verify model catalog
         run: ocgo models
