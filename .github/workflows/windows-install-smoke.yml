@@ -28,11 +28,21 @@ jobs:
         shell: pwsh
         run: Get-Content ./packaging/scoop/ocgo.json | ConvertFrom-Json | Out-Null
 
-      - name: Validate WinGet manifests have expected content
+      - name: Validate WinGet manifests if available
         shell: pwsh
         run: |
-          $r = "./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0"
-          if (-not (Test-Path (Join-Path $r "UlrichZogo.OCGO.yaml"))) { throw "Missing OCGO.yaml" }
-          if (-not (Test-Path (Join-Path $r "UlrichZogo.OCGO.installer.yaml"))) { throw "Missing installer.yaml" }
-          if (-not (Test-Path (Join-Path $r "UlrichZogo.OCGO.locale.en-US.yaml"))) { throw "Missing locale.yaml" }
-          Write-Host "All three WinGet manifest files exist."
+          $manifestDir = "./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0"
+
+          if (-not (Test-Path (Join-Path $manifestDir "UlrichZogo.OCGO.yaml"))) { throw "Missing OCGO.yaml" }
+          if (-not (Test-Path (Join-Path $manifestDir "UlrichZogo.OCGO.installer.yaml"))) { throw "Missing installer.yaml" }
+          if (-not (Test-Path (Join-Path $manifestDir "UlrichZogo.OCGO.locale.en-US.yaml"))) { throw "Missing locale.yaml" }
+
+          if (Get-Command winget -ErrorAction SilentlyContinue) {
+            winget validate $manifestDir
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+            Write-Host "winget validate completed."
+          } else {
+            Write-Host "winget is not available; skipping winget validate."
+          }

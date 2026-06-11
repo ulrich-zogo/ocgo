@@ -130,17 +130,28 @@ if (-not $NoPath) {
 }
 
 $installedExe = Join-Path $InstallDir "ocgo.exe"
-if (Test-Path $installedExe) {
+
+if (-not (Test-Path $installedExe)) {
+    Write-Error "Installed executable not found at $installedExe."
+    exit 1
+}
+
+Write-Host "Verifying installed binary ..."
+& $installedExe --help | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Installed ocgo.exe failed to run with --help."
+    exit 1
+}
+
+Write-Host ""
+Write-Host "OCGO installed successfully."
+Write-Host ""
+Write-Host "Next steps:"
+Write-Host "  ocgo setup"
+Write-Host "  ocgo models"
+Write-Host "  ocgo daemon start"
+Write-Host "  ocgo doctor"
+if (-not $NoPath) {
     Write-Host ""
-    Write-Host "OCGO installed successfully."
-    Write-Host ""
-    Write-Host "Next steps:"
-    Write-Host "  ocgo setup"
-    Write-Host "  ocgo models"
-    Write-Host "  ocgo daemon start"
-    Write-Host "  ocgo doctor"
-    if (-not $NoPath) {
-        Write-Host ""
-        Write-Host "Open a new terminal if 'ocgo' is not immediately available."
-    }
+    Write-Host "Open a new terminal if 'ocgo' is not immediately available."
 }
