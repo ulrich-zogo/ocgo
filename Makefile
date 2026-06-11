@@ -1,4 +1,4 @@
-.PHONY: build run test clean install release check-fork-ownership build-release update-homebrew-formula verify-release verify-homebrew-formula ci
+.PHONY: build run test clean install release check-fork-ownership build-release update-homebrew-formula verify-release verify-homebrew-formula ci test-windows-installer validate-scoop-manifest validate-winget-manifests
 
 FORMULA_PATH ?= Formula/ocgo.rb
 
@@ -52,3 +52,12 @@ verify-release:
 verify-homebrew-formula:
 	@[ -n "$(TAG)" ] || (echo "Usage: make verify-homebrew-formula TAG=v0.1.0 FORMULA_PATH=$(FORMULA_PATH)" && exit 1)
 	./scripts/verify-homebrew-formula.sh "$(TAG)" "$(FORMULA_PATH)"
+
+test-windows-installer:
+	pwsh -File ./scripts/test-install-windows.ps1
+
+validate-scoop-manifest:
+	pwsh -Command "Get-Content ./packaging/scoop/ocgo.json | ConvertFrom-Json | Out-Null"
+
+validate-winget-manifests:
+	pwsh -Command "$$manifestDir = './packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0'; if (-not (Test-Path (Join-Path $$manifestDir 'UlrichZogo.OCGO.yaml'))) { throw 'Missing OCGO.yaml' }; if (-not (Test-Path (Join-Path $$manifestDir 'UlrichZogo.OCGO.installer.yaml'))) { throw 'Missing installer.yaml' }; if (-not (Test-Path (Join-Path $$manifestDir 'UlrichZogo.OCGO.locale.en-US.yaml'))) { throw 'Missing locale.yaml' }; if (Get-Command winget -ErrorAction SilentlyContinue) { $$out = winget validate $$manifestDir 2>&1; $$text = ($$out | Out-String); Write-Host $$text; $$ec = $$LASTEXITCODE; if ($$ec -eq 0) { Write-Host 'winget validate completed.'; exit 0 }; $$hasValidationSuccess = ($$text -match 'Manifest validation succeeded') -or ($$text -match 'Validation succeeded') -or ($$text -match 'succeeded with warnings'); $$hasKnownSchemaWarning = ($$text -match 'Schema header not found'); $$hasHardError = ($$text -match '(?i)\\berror\\b') -or ($$text -match '(?i)\\bfailed\\b') -or ($$text -match '(?i)\\binvalid\\b'); if ($$hasValidationSuccess -and $$hasKnownSchemaWarning -and -not $$hasHardError) { Write-Host 'winget validate returned non-zero but only known schema-header warning was detected.'; exit 0 }; Write-Error \"winget validate failed with exit code $$ec.\"; exit $$ec } else { Write-Host 'winget not available; skipping.' }"

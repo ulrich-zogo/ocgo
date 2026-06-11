@@ -1,0 +1,19 @@
+PackageIdentifier: UlrichZogo.OCGO
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Ulrich Zogo
+PublisherUrl: https://github.com/ulrich-zogo
+PackageName: OCGO
+PackageUrl: https://github.com/ulrich-zogo/ocgo
+License: MIT
+LicenseUrl: https://github.com/ulrich-zogo/ocgo/blob/main/LICENSE
+ShortDescription: Use OpenCode Go with Claude Code, Codex CLI, and Codex Desktop.
+Description: OCGO configures a local compatibility proxy so OpenCode Go can be used with Claude Code, Codex CLI, and Codex Desktop.
+Tags:
+  - opencode
+  - claude-code
+  - codex
+  - cli
+  - ai
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

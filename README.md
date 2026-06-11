@@ -90,20 +90,36 @@ export PATH="$HOME/go/bin:$PATH"
 
 ### Homebrew
 
-A dedicated Homebrew tap is expected at `ulrich-zogo/homebrew-tap`. After the tap repository exists and the formula has been published, install with:
-
-```bash
-brew tap ulrich-zogo/tap
-brew install ocgo
-```
-
-or:
+Install with:
 
 ```bash
 brew install ulrich-zogo/tap/ocgo
 ```
 
-Until the tap is published, use the source build above. See [docs/homebrew.md](docs/homebrew.md) for details on creating and publishing the tap repository. See [docs/release.md](docs/release.md) and [docs/release-rollback.md](docs/release-rollback.md) for the release process and rollback procedures.
+See [docs/homebrew.md](docs/homebrew.md). See [docs/release.md](docs/release.md) and [docs/release-rollback.md](docs/release-rollback.md) for the release process and rollback procedures.
+
+### Windows
+
+PowerShell installer:
+
+```powershell
+irm https://raw.githubusercontent.com/ulrich-zogo/ocgo/main/scripts/install-windows.ps1 | iex
+```
+
+Scoop, after bucket publication:
+
+```powershell
+scoop bucket add ocgo https://github.com/ulrich-zogo/scoop-ocgo
+scoop install ocgo
+```
+
+WinGet, after manifest publication:
+
+```powershell
+winget install UlrichZogo.OCGO
+```
+
+See [docs/windows.md](docs/windows.md).
 
 ## Setup
 
