@@ -5,3 +5,8 @@ dist/
 .env
 .tmp/
 oc-go-cc
+graphify-out/
+.graphify_scripts/
+.graphify_python
+.graphify_*.json
+.graphify_*.txt
