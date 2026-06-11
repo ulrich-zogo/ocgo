@@ -15,7 +15,7 @@ try {
     }
 
     Write-Host "Installing ocgo to $InstallDir ..."
-    & $scriptPath -InstallDir $InstallDir -NoPath -Force
+    & $scriptPath -InstallDir $InstallDir -NoPath -Force -AllowMissingVersion:$AllowMissingVersion
 
     $exePath = Join-Path $InstallDir "ocgo.exe"
     if (-not (Test-Path $exePath)) {
