@@ -44,11 +44,13 @@ jobs:
             if ($ec -ne 0) {
               if ($out -match "succeeded") {
                 Write-Host "winget validate succeeded (with warnings)."
+                exit 0
               } else {
                 exit $ec
               }
             } else {
               Write-Host "winget validate completed."
+              exit 0
             }
           } else {
             Write-Host "winget is not available; skipping winget validate."
