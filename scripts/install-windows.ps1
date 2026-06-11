@@ -145,7 +145,12 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "Installed version:"
-& $installedExe version
+$versionOutput = & $installedExe version 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host $versionOutput
+} else {
+    Write-Host "(version metadata not available in this release)"
+}
 
 Write-Host ""
 Write-Host "OCGO installed successfully."
