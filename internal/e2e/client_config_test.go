@@ -148,38 +148,40 @@ func TestAllClientsUseSameDaemonPort(t *testing.T) {
 		t.Errorf("Desktop state BaseURL = %q, want %q", st.BaseURL, "http://127.0.0.1:3456/v1/")
 	}
 
-	env, ok, err := app.BuildClaudeModelEnv("minimax-m3")
+	launchCfg, err := app.BuildClaudeLaunchConfig(cfg, "minimax-m3", []string{"--help"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok {
-		t.Fatal("expected ok from BuildClaudeModelEnv")
+
+	if launchCfg.BaseURL != "http://127.0.0.1:3456" {
+		t.Errorf("Claude BaseURL = %q, want %q", launchCfg.BaseURL, "http://127.0.0.1:3456")
 	}
 
 	claudeVars := []string{
+		"ANTHROPIC_BASE_URL=http://127.0.0.1:3456",
+		"ANTHROPIC_AUTH_TOKEN=unused",
 		"ANTHROPIC_MODEL=minimax-m3",
 		"ANTHROPIC_SMALL_FAST_MODEL=minimax-m3",
-		"ANTHROPIC_CUSTOM_MODEL_OPTION=minimax-m3",
 	}
 	for _, want := range claudeVars {
 		found := false
-		for _, e := range env {
+		for _, e := range launchCfg.Env {
 			if e == want {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("Claude env missing %q in %v", want, env)
+			t.Errorf("Claude launch config missing env %q in %v", want, launchCfg.Env)
 		}
 	}
 
-	wantURL := "http://127.0.0.1:3456"
-	if base != wantURL {
-		t.Errorf("Claude launch URL derived from config = %q, want %q", base, wantURL)
+	if len(launchCfg.Args) != 1 || launchCfg.Args[0] != "--help" {
+		t.Errorf("Claude passthrough args not preserved: got %v, want [--help]", launchCfg.Args)
 	}
-	if st.BaseURL != wantURL+"/v1/" {
-		t.Errorf("Desktop BaseURL = %q, want %q", st.BaseURL, wantURL+"/v1/")
+
+	if st.BaseURL != "http://127.0.0.1:3456/v1/" {
+		t.Errorf("Desktop BaseURL = %q, want %q", st.BaseURL, "http://127.0.0.1:3456/v1/")
 	}
 
 }
