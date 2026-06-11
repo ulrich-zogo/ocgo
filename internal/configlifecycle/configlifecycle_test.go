@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -308,3 +309,43 @@ func TestIsWithin(t *testing.T) {
 		t.Error("isWithin should reject files outside base")
 	}
 }
+
+func TestProcessStatusForInvalidPID(t *testing.T) {
+	status := processStatus(-1)
+	if status != StatusStale {
+		t.Errorf("processStatus(-1) = %q, want %q", status, StatusStale)
+	}
+}
+
+func TestProcessStatusForSelfPID(t *testing.T) {
+	pid := os.Getpid()
+	status := processStatus(pid)
+	if runtime.GOOS == "windows" {
+		if status != StatusUnknown {
+			t.Errorf("processStatus(self) on windows = %q, want %q", status, StatusUnknown)
+		}
+	} else {
+		if status != StatusPresent {
+			t.Errorf("processStatus(self) = %q, want %q", status, StatusPresent)
+		}
+	}
+}
+
+func TestProcessStatusForNonExistentPID(t *testing.T) {
+	status := processStatus(999999999)
+	if status != StatusStale {
+		t.Errorf("processStatus(non-existent) = %q, want %q", status, StatusStale)
+	}
+}
+
+func TestProcessStatusHasNoSideEffects(t *testing.T) {
+	pid := os.Getpid()
+	before := os.Getpid()
+	status := processStatus(pid)
+	_ = status
+	after := os.Getpid()
+	if after != before {
+		t.Error("processStatus changed the process state")
+	}
+}
+

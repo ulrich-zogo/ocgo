@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"ocgo/internal/buildinfo"
@@ -175,13 +177,7 @@ func Inspect() Inspection {
 	if _, err := os.Stat(p.DaemonStateFile); err == nil {
 		ins.Daemon.PIDStatus = StatusUnknown
 		if pid, err := config.ReadPID(); err == nil {
-			if proc, err := os.FindProcess(pid); err == nil {
-				if err := proc.Signal(os.Interrupt); err == nil {
-					ins.Daemon.PIDStatus = StatusPresent
-				} else {
-					ins.Daemon.PIDStatus = StatusStale
-				}
-			}
+			ins.Daemon.PIDStatus = processStatus(pid)
 		}
 	}
 	if b, err := os.ReadFile(p.DesktopStateFile); err == nil {
@@ -194,6 +190,23 @@ func Inspect() Inspection {
 		ins.CodexDesktop.BackupFile = StatusPresent
 	}
 	return ins
+}
+
+func processStatus(pid int) Status {
+	if pid <= 0 {
+		return StatusStale
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil || proc == nil {
+		return StatusStale
+	}
+	if runtime.GOOS == "windows" {
+		return StatusUnknown
+	}
+	if err := proc.Signal(syscall.Signal(0)); err == nil {
+		return StatusPresent
+	}
+	return StatusStale
 }
 
 type BackupResult struct {
