@@ -61,3 +61,5 @@ try {
     Write-Host "Cleaning up $TempRoot ..."
     Remove-Item -Recurse -Force $TempRoot -ErrorAction SilentlyContinue
 }
+
+exit 0
