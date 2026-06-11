@@ -54,6 +54,10 @@ ocgo starts a local proxy that translates requests from your AI coding tools int
 ocgo version
 ocgo version --json
 
+# 0a. Inspect your configuration
+ocgo config paths
+ocgo config inspect
+
 # 1. Save your API key
 ocgo setup
 
