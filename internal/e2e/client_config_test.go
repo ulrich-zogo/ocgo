@@ -174,10 +174,14 @@ func TestAllClientsUseSameDaemonPort(t *testing.T) {
 		}
 	}
 
-	launchURL := base
-	if launchURL != "http://127.0.0.1:3456" {
-		t.Errorf("Claude launch URL should be %q, got %q", "http://127.0.0.1:3456", launchURL)
+	wantURL := "http://127.0.0.1:3456"
+	if base != wantURL {
+		t.Errorf("Claude launch URL derived from config = %q, want %q", base, wantURL)
 	}
+	if st.BaseURL != wantURL+"/v1/" {
+		t.Errorf("Desktop BaseURL = %q, want %q", st.BaseURL, wantURL+"/v1/")
+	}
+
 }
 
 func TestClaudeLaunchDoesNotWriteCodexConfig(t *testing.T) {
