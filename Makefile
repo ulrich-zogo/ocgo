@@ -3,6 +3,9 @@
 FORMULA_PATH ?= Formula/ocgo.rb
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS ?= -s -w -X main.version=$(VERSION) -X ocgo/internal/buildinfo.Version=$(VERSION) -X ocgo/internal/buildinfo.Commit=$(COMMIT) -X ocgo/internal/buildinfo.Date=$(DATE)
 EXE := $(shell go env GOEXE)
 OCGO_BIN := bin/ocgo$(EXE)
 GOBIN := $(shell go env GOBIN)
@@ -10,7 +13,7 @@ GOPATH := $(shell go env GOPATH)
 INSTALL_DIR := $(if $(GOBIN),$(GOBIN),$(GOPATH)/bin)
 
 build:
-	go build -ldflags "-X main.version=$(VERSION)" -o $(OCGO_BIN) ./cmd/ocgo
+	go build -ldflags "$(LDFLAGS)" -o $(OCGO_BIN) ./cmd/ocgo
 
 run:
 	go run ./cmd/ocgo

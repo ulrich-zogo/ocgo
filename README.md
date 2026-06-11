@@ -50,6 +50,10 @@ ocgo starts a local proxy that translates requests from your AI coding tools int
 ## Quick start
 
 ```bash
+# 0. Check your installed version
+ocgo version
+ocgo version --json
+
 # 1. Save your API key
 ocgo setup
 

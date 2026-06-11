@@ -36,6 +36,22 @@ try {
     }
     Write-Host "  OK"
 
+    Write-Host "Running ocgo version ..."
+    $versionOutput = & $exePath version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "ocgo version exited with code $LASTEXITCODE"
+        exit 1
+    }
+    Write-Host $versionOutput
+
+    Write-Host "Running ocgo version --json ..."
+    $jsonOutput = & $exePath version --json 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "ocgo version --json exited with code $LASTEXITCODE"
+        exit 1
+    }
+    $jsonOutput | ConvertFrom-Json | Out-Null
+
     Write-Host ""
     Write-Host "All tests passed."
 } finally {

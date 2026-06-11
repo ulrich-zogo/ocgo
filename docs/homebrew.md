@@ -79,4 +79,6 @@ The release smoke workflow verifies that the tap points to the requested release
 brew tap ulrich-zogo/tap https://github.com/ulrich-zogo/homebrew-tap
 brew install ocgo
 ocgo --help
+ocgo version
+ocgo version --json
 ```

@@ -105,6 +105,8 @@ Get-ChildItem .\packaging\winget\manifests\u\UlrichZogo\OCGO\0.1.0 -Filter *.yam
 
 ```powershell
 ocgo --help
+ocgo version
+ocgo version --json
 ocgo models
 ocgo doctor
 ```

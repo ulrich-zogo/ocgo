@@ -144,6 +144,10 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
+Write-Host "Installed version:"
+& $installedExe version
+
+Write-Host ""
 Write-Host "OCGO installed successfully."
 Write-Host ""
 Write-Host "Next steps:"
