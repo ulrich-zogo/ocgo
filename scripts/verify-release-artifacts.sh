@@ -70,6 +70,18 @@ echo "Verifying checksums..."
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+check_version() {
+  local binary="$1"
+  if ! "$binary" version > /dev/null 2>&1; then
+    echo "Binary $binary failed to run 'version'" >&2
+    exit 1
+  fi
+  if ! "$binary" version --json | grep -q '"version":'; then
+    echo "Binary $binary 'version --json' missing version field" >&2
+    exit 1
+  fi
+}
+
 verify_extracted_dir() {
   local root="$1"
   local binary="$2"
@@ -98,6 +110,10 @@ for file in "${expected[@]}"; do
     *.tar.gz)
       tar -xzf "$DIST_DIR/$file" -C "$target"
       verify_extracted_dir "$target" "$APP_NAME"
+      local bin_path="$(find "$target" -type f -name "$APP_NAME" | head -1)"
+      if [[ -n "$bin_path" ]]; then
+        check_version "$bin_path"
+      fi
       echo "  Extracted and verified: $file"
       ;;
     *.zip)

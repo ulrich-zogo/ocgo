@@ -28,6 +28,8 @@ jobs:
         run: |
           which ocgo
           ocgo --help
+          ocgo version || true
+          ocgo version --json || true
 
       - name: Verify model catalog
         run: ocgo models

@@ -3,7 +3,8 @@ param(
     [string]$InstallDir = "$env:LOCALAPPDATA\ocgo\bin",
     [switch]$NoPath,
     [switch]$Force,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$AllowMissingVersion
 )
 
 $ErrorActionPreference = "Stop"
@@ -140,6 +141,18 @@ Write-Host "Verifying installed binary ..."
 & $installedExe --help | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Installed ocgo.exe failed to run with --help."
+    exit 1
+}
+
+Write-Host ""
+Write-Host "Installed version:"
+$versionOutput = & $installedExe version 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host $versionOutput
+} elseif ($AllowMissingVersion) {
+    Write-Host "(version metadata not available in this release)"
+} else {
+    Write-Error "Installed ocgo.exe failed to report version."
     exit 1
 }
 

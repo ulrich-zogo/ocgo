@@ -63,6 +63,21 @@ TAG=v0.2.0 make build-release
 TAG=v0.2.0 HOMEBREW_TAP_REPO=ulrich-zogo/homebrew-tap make update-homebrew-formula
 ```
 
+## Build metadata
+
+Release binaries are built with embedded metadata:
+
+- version
+- commit
+- build date
+
+Verify a release binary with:
+
+```bash
+ocgo version
+ocgo version --json
+```
+
 ## Post-release smoke test
 
 After publishing a release, run:

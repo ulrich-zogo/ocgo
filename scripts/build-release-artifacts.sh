@@ -7,7 +7,11 @@ APP_NAME="${APP_NAME:-ocgo}"
 CMD_PATH="${CMD_PATH:-./cmd/ocgo}"
 TAG="${1:-${TAG:-}}"
 VERSION="${TAG#v}"
+COMMIT="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 DIST_DIR="${DIST_DIR:-dist}"
+
+LDFLAGS="-s -w -X main.version=$VERSION -X ocgo/internal/buildinfo.Version=$VERSION -X ocgo/internal/buildinfo.Commit=$COMMIT -X ocgo/internal/buildinfo.Date=$DATE"
 
 if [[ -z "$TAG" ]]; then
   echo "Usage: $0 v0.1.0"
@@ -42,7 +46,7 @@ build_one() {
 
   echo "Building $goos/$goarch..."
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-    go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$dir/$bin" "$CMD_PATH"
+    go build -trimpath -ldflags "$LDFLAGS" -o "$dir/$bin" "$CMD_PATH"
 
   cp README.md "$dir/" 2>/dev/null || true
   cp LICENSE "$dir/" 2>/dev/null || true
