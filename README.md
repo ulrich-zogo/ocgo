@@ -494,6 +494,10 @@ Changes to note:
 - If you hardcoded `kimi-k2.6` as a model, switch to the shared default model selection.
 - Model mappings remain optional.
 
+## Client configuration validation
+
+See [docs/client-validation.md](docs/client-validation.md) for detailed validation steps for Claude Code, Codex CLI, and Codex Desktop.
+
 ## Limitations
 
 - Token counting is local and approximate. It does not attempt to reproduce any proprietary tokenizer.
