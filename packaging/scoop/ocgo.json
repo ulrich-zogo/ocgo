@@ -1,0 +1,30 @@
+{
+    "version": "0.1.0",
+    "description": "Use OpenCode Go with Claude Code, Codex CLI, and Codex Desktop.",
+    "homepage": "https://github.com/ulrich-zogo/ocgo",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/ulrich-zogo/ocgo/releases/download/v0.1.0/ocgo_0.1.0_windows_x86_64.zip",
+            "hash": "08b3a7cd284e2f65e3439c353d296312d597f19c99866666a56039f6ac28afc4"
+        },
+        "arm64": {
+            "url": "https://github.com/ulrich-zogo/ocgo/releases/download/v0.1.0/ocgo_0.1.0_windows_arm64.zip",
+            "hash": "bd0084a1e37dd5b23d6720ba2a911386c3b7ef873753c3364ed15f39cbbe1741"
+        }
+    },
+    "bin": "ocgo.exe",
+    "checkver": {
+        "github": "https://github.com/ulrich-zogo/ocgo"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/ulrich-zogo/ocgo/releases/download/v$version/ocgo_$version_windows_x86_64.zip"
+            },
+            "arm64": {
+                "url": "https://github.com/ulrich-zogo/ocgo/releases/download/v$version/ocgo_$version_windows_arm64.zip"
+            }
+        }
+    }
+}

@@ -1,0 +1,165 @@
+# Windows installation
+
+OCGO supports three Windows installation paths:
+
+1. PowerShell installer
+2. Scoop
+3. WinGet
+
+## PowerShell installer
+
+Install the latest OCGO release:
+
+```powershell
+irm https://raw.githubusercontent.com/ulrich-zogo/ocgo/main/scripts/install-windows.ps1 | iex
+```
+
+Or run explicitly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
+```
+
+## Install a specific version
+
+```powershell
+.\scripts\install-windows.ps1 -Version v0.1.0
+```
+
+## Install directory
+
+Default:
+
+```text
+%LOCALAPPDATA%\ocgo\bin
+```
+
+Custom:
+
+```powershell
+.\scripts\install-windows.ps1 -InstallDir "$env:USERPROFILE\Tools\ocgo"
+```
+
+## PATH
+
+The installer adds the install directory to the user PATH by default.
+
+Use:
+
+```powershell
+.\scripts\install-windows.ps1 -NoPath
+```
+
+to skip PATH modification.
+
+## Scoop
+
+Future Scoop install path:
+
+```powershell
+scoop bucket add ocgo https://github.com/ulrich-zogo/scoop-ocgo
+scoop install ocgo
+```
+
+Current manifest location:
+
+```text
+packaging/scoop/ocgo.json
+```
+
+Local test:
+
+```powershell
+scoop install .\packaging\scoop\ocgo.json
+ocgo --help
+scoop uninstall ocgo
+```
+
+## WinGet
+
+Future WinGet install path:
+
+```powershell
+winget install UlrichZogo.OCGO
+```
+
+Current draft manifests:
+
+```text
+packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0/
+```
+
+Local validation:
+
+```powershell
+winget validate .\packaging\winget\manifests\u\UlrichZogo\OCGO\0.1.0
+```
+
+## Verify installation
+
+```powershell
+ocgo --help
+ocgo models
+ocgo doctor
+```
+
+## Setup
+
+```powershell
+ocgo setup
+ocgo opencode model set-default minimax-m3
+ocgo daemon start
+ocgo doctor
+```
+
+## Uninstall PowerShell installation
+
+Remove:
+
+```text
+%LOCALAPPDATA%\ocgo\bin\ocgo.exe
+```
+
+Optionally remove the PATH entry manually from:
+
+```text
+System Properties → Environment Variables → User variables → Path
+```
+
+This does not remove OCGO configuration files.
+
+## Configuration files
+
+OCGO configuration is stored under:
+
+```text
+%USERPROFILE%\.config\ocgo
+%USERPROFILE%\.codex
+```
+
+## Troubleshooting
+
+If `ocgo` is not found after installation:
+
+1. Open a new terminal.
+2. Check:
+
+```powershell
+$env:Path
+```
+
+3. Run directly:
+
+```powershell
+& "$env:LOCALAPPDATA\ocgo\bin\ocgo.exe" --help
+```
+
+## Security
+
+The PowerShell installer, Scoop manifest, and WinGet manifests download release assets from:
+
+```text
+https://github.com/ulrich-zogo/ocgo/releases
+```
+
+Release checksums are verified before installation where supported.

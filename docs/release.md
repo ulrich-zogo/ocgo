@@ -95,3 +95,21 @@ ocgo_<version>_windows_arm64.zip
 ocgo_<version>_windows_x86_64.zip
 checksums.txt
 ```
+
+## Windows packaging
+
+Windows archives are consumed by:
+
+- `scripts/install-windows.ps1`
+- `packaging/scoop/ocgo.json`
+- `packaging/winget/manifests/u/UlrichZogo/OCGO/<version>/`
+
+The expected Windows assets are:
+
+```text
+ocgo_<version>_windows_x86_64.zip
+ocgo_<version>_windows_arm64.zip
+checksums.txt
+```
+
+Scoop and WinGet manifests must be updated when a new release is published. Automation for external publishing can be added in a future PR.

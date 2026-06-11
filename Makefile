@@ -1,4 +1,4 @@
-.PHONY: build run test clean install release check-fork-ownership build-release update-homebrew-formula verify-release verify-homebrew-formula ci
+.PHONY: build run test clean install release check-fork-ownership build-release update-homebrew-formula verify-release verify-homebrew-formula ci test-windows-installer validate-scoop-manifest validate-winget-manifests
 
 FORMULA_PATH ?= Formula/ocgo.rb
 
@@ -52,3 +52,12 @@ verify-release:
 verify-homebrew-formula:
 	@[ -n "$(TAG)" ] || (echo "Usage: make verify-homebrew-formula TAG=v0.1.0 FORMULA_PATH=$(FORMULA_PATH)" && exit 1)
 	./scripts/verify-homebrew-formula.sh "$(TAG)" "$(FORMULA_PATH)"
+
+test-windows-installer:
+	pwsh -File ./scripts/test-install-windows.ps1
+
+validate-scoop-manifest:
+	pwsh -Command "Get-Content ./packaging/scoop/ocgo.json | ConvertFrom-Json | Out-Null"
+
+validate-winget-manifests:
+	pwsh -Command "if (Get-Command winget -ErrorAction SilentlyContinue) { winget validate ./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0 } else { Write-Host 'winget not available; skipping.' }"
