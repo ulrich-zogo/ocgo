@@ -7,3 +7,7 @@ import "syscall"
 func DetachedAttrs() *syscall.SysProcAttr {
 	return nil
 }
+
+func signalZeroAvailable() bool {
+	return false
+}

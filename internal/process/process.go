@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"ocgo/internal/config"
@@ -174,6 +175,31 @@ func StartBackgroundWithWait(base string, timeout time.Duration) (*exec.Cmd, err
 		return cmd, err
 	}
 	return cmd, nil
+}
+
+type ProcessStatus string
+
+const (
+	StatusPresent ProcessStatus = "present"
+	StatusStale   ProcessStatus = "stale"
+	StatusUnknown ProcessStatus = "unknown"
+)
+
+func StatusForPID(pid int) ProcessStatus {
+	if pid <= 0 {
+		return StatusStale
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil || proc == nil {
+		return StatusStale
+	}
+	if !signalZeroAvailable() {
+		return StatusUnknown
+	}
+	if err := proc.Signal(syscall.Signal(0)); err == nil {
+		return StatusPresent
+	}
+	return StatusStale
 }
 
 func KillPID(pid int) error {

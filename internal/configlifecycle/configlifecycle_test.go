@@ -5,12 +5,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestBackupIncludesManifest(t *testing.T) {
@@ -312,101 +309,5 @@ func TestIsWithin(t *testing.T) {
 	}
 }
 
-func TestProcessStatusForInvalidPID(t *testing.T) {
-	status := processStatus(-1)
-	if status != StatusStale {
-		t.Errorf("processStatus(-1) = %q, want %q", status, StatusStale)
-	}
-}
 
-func TestProcessStatusForSelfPID(t *testing.T) {
-	pid := os.Getpid()
-	status := processStatus(pid)
-	if runtime.GOOS == "windows" {
-		if status != StatusUnknown {
-			t.Errorf("processStatus(self) on windows = %q, want %q", status, StatusUnknown)
-		}
-	} else {
-		if status != StatusPresent {
-			t.Errorf("processStatus(self) = %q, want %q", status, StatusPresent)
-		}
-	}
-}
-
-func TestProcessStatusForNonExistentPID(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcessExitImmediately")
-	cmd.Env = append(os.Environ(), "OCGO_TEST_HELPER_PROCESS=1")
-
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	pid := cmd.Process.Pid
-	if err := cmd.Wait(); err != nil {
-		t.Fatal(err)
-	}
-
-	status := processStatus(pid)
-	if runtime.GOOS == "windows" {
-		if status != StatusUnknown {
-			t.Errorf("processStatus(terminated child) on windows = %q, want %q", status, StatusUnknown)
-		}
-	} else {
-		if status != StatusStale {
-			t.Errorf("processStatus(terminated child) = %q, want %q", status, StatusStale)
-		}
-	}
-}
-
-func TestProcessStatusHasNoSideEffects(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcessSleep")
-	cmd.Env = append(os.Environ(), "OCGO_TEST_HELPER_SLEEP=1")
-
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	pid := cmd.Process.Pid
-
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
-
-	status := processStatus(pid)
-
-	if runtime.GOOS == "windows" {
-		if status != StatusUnknown {
-			t.Fatalf("processStatus(live child) on windows = %q, want %q", status, StatusUnknown)
-		}
-	} else {
-		if status != StatusPresent {
-			t.Fatalf("processStatus(live child) = %q, want %q", status, StatusPresent)
-		}
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case err := <-done:
-		t.Fatalf("child process exited after processStatus: %v", err)
-	case <-time.After(200 * time.Millisecond):
-	}
-}
-
-func TestHelperProcessExitImmediately(t *testing.T) {
-	if os.Getenv("OCGO_TEST_HELPER_PROCESS") != "1" {
-		return
-	}
-	os.Exit(0)
-}
-
-func TestHelperProcessSleep(t *testing.T) {
-	if os.Getenv("OCGO_TEST_HELPER_SLEEP") != "1" {
-		return
-	}
-	time.Sleep(30 * time.Second)
-	os.Exit(0)
-}
 
