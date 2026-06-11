@@ -464,7 +464,7 @@ bin/ocgo setup
 make release TAG=v0.2.0
 ```
 
-Requires `gh` (GitHub CLI) for creating releases and updating the Homebrew formula. See [docs/release.md](docs/release.md) for the full release process, including automated CI releases.
+Requires `gh` (GitHub CLI) for creating releases and updating the Homebrew formula. See [docs/release.md](docs/release.md) for the full release process and [docs/release-rollback.md](docs/release-rollback.md) for rollback procedures.
 
 ## Upgrading from earlier versions
 
