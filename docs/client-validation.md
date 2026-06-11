@@ -54,6 +54,24 @@ Expected:
 - restore to ChatGPT/OpenAI is possible;
 - daemon health is valid.
 
+### Restore validation
+
+After enabling OpenCode mode, always validate restore:
+
+```bash
+ocgo codex desktop enable chatgpt
+ocgo codex desktop status
+```
+
+Expected:
+
+- mode is `chatgpt` or equivalent;
+- the previous Desktop config is restored;
+- the backup remains available or is referenced in OCGO state;
+- `ocgo doctor codex --mode desktop` does not report a corrupted managed state.
+
+Do not edit the Codex Desktop config manually while OCGO is managing it unless you first restore ChatGPT mode or take a backup.
+
 ## Troubleshooting
 
 Use:
