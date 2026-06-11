@@ -1,10 +1,55 @@
 package app
 
 import (
+	"fmt"
+
 	"ocgo/internal/config"
 	"ocgo/internal/mapping"
 	"ocgo/internal/models"
 )
+
+// ClaudeLaunchConfig holds the parameters needed to launch Claude Code.
+type ClaudeLaunchConfig struct {
+	BaseURL string
+	Args    []string
+	Env     []string
+}
+
+// BuildClaudeLaunchConfig computes the Claude launch configuration from a
+// loaded OCGO config, an optional explicit model, and any passthrough args.
+// It returns an error if the model is unknown.
+func BuildClaudeLaunchConfig(cfg config.Config, model string, passthroughArgs []string) (ClaudeLaunchConfig, error) {
+	base := fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port)
+
+	claudeArgs := make([]string, len(passthroughArgs))
+	copy(claudeArgs, passthroughArgs)
+
+	env := []string{
+		"ANTHROPIC_BASE_URL=" + base,
+		"ANTHROPIC_AUTH_TOKEN=unused",
+	}
+
+	mappings, err := mapping.LoadModelMappings()
+	if err != nil {
+		return ClaudeLaunchConfig{}, err
+	}
+
+	modelEnv, hasEffective, err := BuildClaudeModelEnv(model)
+	if err != nil {
+		return ClaudeLaunchConfig{}, err
+	}
+	if hasEffective {
+		env = append(env, modelEnv...)
+	} else {
+		env = append(env, BuildClaudeLegacyMappingEnv(mappings)...)
+	}
+
+	return ClaudeLaunchConfig{
+		BaseURL: base,
+		Args:    claudeArgs,
+		Env:     env,
+	}, nil
+}
 
 // BuildCodexArgs builds the argv that will be passed to the real
 // `codex` binary. It always uses the ocgo-launch profile and adds

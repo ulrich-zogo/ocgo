@@ -25,15 +25,18 @@ func LaunchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			base := fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port)
-			serverCmd, err := process.StartLaunchServer(base)
+			launchCfg, err := BuildClaudeLaunchConfig(cfg, model, args)
+			if err != nil {
+				return err
+			}
+			serverCmd, err := process.StartLaunchServer(launchCfg.BaseURL)
 			if err != nil {
 				return err
 			}
 			if serverCmd != nil {
 				defer process.StopManagedServer(serverCmd)
 			}
-			claudeArgs := append([]string{}, args...)
+			claudeArgs := launchCfg.Args
 			if yes {
 				claudeArgs = append([]string{"--dangerously-skip-permissions"}, claudeArgs...)
 			}
@@ -43,21 +46,10 @@ func LaunchCmd() *cobra.Command {
 			}
 			c := exec.Command(bin, claudeArgs...)
 			c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
-			c.Env = append(os.Environ(), "ANTHROPIC_BASE_URL="+base, "ANTHROPIC_AUTH_TOKEN=unused")
-			mappings, err := mapping.LoadModelMappings()
-			if err != nil {
-				return err
+			c.Env = append(os.Environ(), launchCfg.Env...)
+			if mappings, err := mapping.LoadModelMappings(); err == nil {
+				mapping.PrintLaunchMapping("claude", mappings["claude"])
 			}
-			modelEnv, hasEffective, err := BuildClaudeModelEnv(model)
-			if err != nil {
-				return err
-			}
-			if hasEffective {
-				c.Env = append(c.Env, modelEnv...)
-			} else {
-				c.Env = append(c.Env, BuildClaudeLegacyMappingEnv(mappings)...)
-			}
-			mapping.PrintLaunchMapping("claude", mappings["claude"])
 			return c.Run()
 		},
 	}
