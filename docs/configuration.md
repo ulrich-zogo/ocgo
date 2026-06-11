@@ -54,3 +54,14 @@ export OCGO_API_KEY=sk-opencode-your-key
 ```
 
 When both the file and the env var are set, the env var takes precedence.
+
+## Configuration lifecycle
+
+See [config-lifecycle.md](config-lifecycle.md) for safe backup, restore, and reset commands:
+
+```bash
+ocgo config paths
+ocgo config inspect
+ocgo config backup
+ocgo config reset --dry-run
+```

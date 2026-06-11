@@ -126,3 +126,12 @@ Exit codes:
 
 - `0` — all checks passed or only warnings exist
 - `1` — at least one check failed with an error
+
+## Reset OCGO safely
+
+```bash
+ocgo config inspect
+ocgo config backup
+ocgo config reset --scope ocgo --dry-run
+ocgo config reset --scope ocgo --yes
+```

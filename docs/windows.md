@@ -136,6 +136,15 @@ System Properties → Environment Variables → User variables → Path
 
 This does not remove OCGO configuration files.
 
+## Reset Windows configuration
+
+```powershell
+ocgo config paths
+ocgo config inspect
+ocgo config backup
+ocgo config reset --scope ocgo --dry-run
+```
+
 ## Configuration files
 
 OCGO configuration is stored under:
