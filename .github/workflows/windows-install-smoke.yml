@@ -32,12 +32,22 @@ jobs:
         shell: pwsh
         run: |
           $root = "./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0"
-          Get-ChildItem $root -Filter *.yaml | ForEach-Object {
-            $content = Get-Content $_.FullName -Raw
-            $null = [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$null, [ref]$errors)
-            if ($errors.Count -gt 0) {
-              Write-Error "YAML parse errors in $($_.Name): $($errors -join '; ')"
-              exit 1
-            }
-            Write-Host "$($_.Name): valid"
+          $checks = @{
+            "UlrichZogo.OCGO.yaml"              = @("PackageIdentifier: UlrichZogo.OCGO", "PackageVersion: 0.1.0", "ManifestType: version")
+            "UlrichZogo.OCGO.installer.yaml"    = @("PackageIdentifier: UlrichZogo.OCGO", "InstallerType: zip", "InstallerSha256: 08b3a7cd284e2f65e3439c353d296312d597f19c99866666a56039f6ac28afc4", "InstallerSha256: bd0084a1e37dd5b23d6720ba2a911386c3b7ef873753c3364ed15f39cbbe1741")
+            "UlrichZogo.OCGO.locale.en-US.yaml" = @("PackageIdentifier: UlrichZogo.OCGO", "PackageLocale: en-US", "ShortDescription: Use OpenCode Go with Claude Code")
           }
+          $ok = $true
+          foreach ($f in $checks.Keys) {
+            $path = Join-Path $root $f
+            if (-not (Test-Path $path)) { Write-Error "Missing: $f"; $ok = $false; continue }
+            $content = Get-Content $path -Raw
+            foreach ($key in $checks[$f]) {
+              if ($content -notmatch [regex]::Escape($key)) {
+                Write-Error "$f missing expected content: $key"
+                $ok = $false
+              }
+            }
+            if ($ok) { Write-Host "$f: valid" }
+          }
+          if (-not $ok) { exit 1 }
