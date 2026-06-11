@@ -1,3 +1,4 @@
+$schema: https://aka.ms/winget-manifest.version.schema.json
 PackageIdentifier: UlrichZogo.OCGO
 PackageVersion: 0.1.0
 DefaultLocale: en-US

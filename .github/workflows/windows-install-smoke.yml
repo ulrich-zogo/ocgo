@@ -38,20 +38,11 @@ jobs:
           if (-not (Test-Path (Join-Path $manifestDir "UlrichZogo.OCGO.locale.en-US.yaml"))) { throw "Missing locale.yaml" }
 
           if (Get-Command winget -ErrorAction SilentlyContinue) {
-            $out = winget validate $manifestDir 2>&1
-            $out | Write-Host
-            $ec = $LASTEXITCODE
-            if ($ec -ne 0) {
-              if ($out -match "succeeded") {
-                Write-Host "winget validate succeeded (with warnings)."
-                exit 0
-              } else {
-                exit $ec
-              }
-            } else {
-              Write-Host "winget validate completed."
-              exit 0
+            winget validate $manifestDir
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
             }
+            Write-Host "winget validate completed."
           } else {
             Write-Host "winget is not available; skipping winget validate."
           }
