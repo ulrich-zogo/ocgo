@@ -125,17 +125,33 @@ func configBackupCmd() *cobra.Command {
 }
 
 func configRestoreCmd() *cobra.Command {
-	var dryRun, yes bool
+	var dryRun, yes, includeCodexConfig bool
 	cmd := &cobra.Command{
 		Use:   "restore <backup.zip>",
 		Short: "Restore OCGO configuration from a backup",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return configlifecycle.Restore(args[0], configlifecycle.RestoreOptions{DryRun: dryRun, Yes: yes})
+			result, err := configlifecycle.Restore(args[0], configlifecycle.RestoreOptions{
+				DryRun: dryRun, Yes: yes, IncludeCodexConfig: includeCodexConfig,
+			})
+			if err != nil {
+				return err
+			}
+			if dryRun {
+				fmt.Fprintf(cmd.OutOrStdout(), "Backup created at: (from manifest)\n")
+				fmt.Fprintf(cmd.OutOrStdout(), "Files to restore (%d):\n", len(result.Files))
+				for _, f := range result.Files {
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", f)
+				}
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Restored %d files.\n", len(result.Files))
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be restored without modifying anything")
 	cmd.Flags().BoolVar(&yes, "yes", false, "Skip confirmation prompt")
+	cmd.Flags().BoolVar(&includeCodexConfig, "include-codex-config", false, "Allow restoring .codex/config.toml if present in backup")
 	return cmd
 }
 
@@ -151,7 +167,7 @@ Scopes:
   ocgo            Reset OCGO core config, mapping, selection, daemon, desktop state
   cache           Reset model catalog cache only
   codex-cli       Reset Codex CLI OCGO profile and model catalog
-  codex-desktop   Reset Codex Desktop OCGO mode (run 'ocgo codex desktop enable chatgpt')
+  codex-desktop   Reset Codex Desktop OCGO state (restores desktop backup if available)
   all             Reset all of the above
 
 By default --scope ocgo is used. A backup is created automatically before any destructive
@@ -161,15 +177,42 @@ operation unless --no-backup is specified (requires --yes).`,
 			if scope == "" {
 				scope = configlifecycle.ResetScopeOcgo
 			}
-			return configlifecycle.Reset(configlifecycle.ResetOptions{
-				Scope: scope, DryRun: dryRun, Yes: yes, IncludeBackups: includeBackups, NoBackup: noBackup,
+			result, err := configlifecycle.Reset(configlifecycle.ResetOptions{
+				Scope: scope, DryRun: dryRun, Yes: yes,
+				IncludeBackups: includeBackups, NoBackup: noBackup,
 			})
+			if err != nil {
+				return err
+			}
+			if scope == configlifecycle.ResetScopeCodexDesktop {
+				fmt.Fprintln(cmd.OutOrStdout(), "Codex Desktop state reset.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Run 'ocgo codex desktop enable chatgpt' to restore the original ChatGPT/OpenAI provider.")
+				return nil
+			}
+			if len(result.Removed) == 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "Nothing to reset for scope %s.\n", scope)
+				return nil
+			}
+			if dryRun {
+				fmt.Fprintf(cmd.OutOrStdout(), "Scope: %s\n", scope)
+				fmt.Fprintf(cmd.OutOrStdout(), "Files to remove (%d):\n", len(result.Removed))
+				for _, f := range result.Removed {
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", f)
+				}
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Scope: %s\n", scope)
+			if result.Backup != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Backup: %s\n", result.Backup)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed %d files.\n", len(result.Removed))
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&scopeStr, "scope", "ocgo", "Reset scope: ocgo, cache, codex-cli, codex-desktop, all")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be deleted without modifying anything")
 	cmd.Flags().BoolVar(&yes, "yes", false, "Skip confirmation prompt")
-	cmd.Flags().BoolVar(&includeBackups, "include-backups", false, "Also remove backup directories (requires --scope all)")
+	cmd.Flags().BoolVar(&includeBackups, "include-backups", false, "Also remove backup files (requires --scope all)")
 	cmd.Flags().BoolVar(&noBackup, "no-backup", false, "Skip automatic backup before reset (requires --yes)")
 	return cmd
 }

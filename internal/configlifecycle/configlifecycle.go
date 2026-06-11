@@ -173,9 +173,15 @@ func Inspect() Inspection {
 		}
 	}
 	if _, err := os.Stat(p.DaemonStateFile); err == nil {
-		ins.Daemon.PIDStatus = StatusStale
+		ins.Daemon.PIDStatus = StatusUnknown
 		if pid, err := config.ReadPID(); err == nil {
-			_ = pid
+			if proc, err := os.FindProcess(pid); err == nil {
+				if err := proc.Signal(os.Interrupt); err == nil {
+					ins.Daemon.PIDStatus = StatusPresent
+				} else {
+					ins.Daemon.PIDStatus = StatusStale
+				}
+			}
 		}
 	}
 	if b, err := os.ReadFile(p.DesktopStateFile); err == nil {
@@ -207,7 +213,9 @@ func Backup(dest string, includeCodexConfig bool) (BackupResult, error) {
 	ocgoDir := config.ConfigDir()
 	codexDir := filepath.Dir(config.CodexConfigFile())
 
-	os.MkdirAll(filepath.Dir(dest), 0755)
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return BackupResult{}, fmt.Errorf("failed to create backup directory: %w", err)
+	}
 
 	buf := new(bytes.Buffer)
 	zw := zip.NewWriter(buf)
@@ -258,12 +266,22 @@ func Backup(dest string, includeCodexConfig bool) (BackupResult, error) {
 			added++
 		}
 	}
-	mb, _ := json.MarshalIndent(manifest, "", "  ")
-	mfh, _ := zw.Create("backup-manifest.json")
-	mfh.Write(append(mb, '\n'))
-	zw.Close()
+	mb, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return BackupResult{}, fmt.Errorf("failed to marshal manifest: %w", err)
+	}
+	mfh, err := zw.Create("backup-manifest.json")
+	if err != nil {
+		return BackupResult{}, fmt.Errorf("failed to create manifest in zip: %w", err)
+	}
+	if _, err := mfh.Write(append(mb, '\n')); err != nil {
+		return BackupResult{}, fmt.Errorf("failed to write manifest: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return BackupResult{}, fmt.Errorf("failed to close zip: %w", err)
+	}
 	if err := os.WriteFile(dest, buf.Bytes(), 0644); err != nil {
-		return BackupResult{}, err
+		return BackupResult{}, fmt.Errorf("failed to write backup file: %w", err)
 	}
 	return BackupResult{Path: dest, FileCount: added + 1}, nil
 }
@@ -273,15 +291,23 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+func isWithin(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
+}
+
 func makeRelative(path, ocgoDir, codexDir string) (string, error) {
-	if strings.HasPrefix(path, ocgoDir) {
+	if isWithin(ocgoDir, path) {
 		rel, err := filepath.Rel(ocgoDir, path)
 		if err != nil {
 			return "", err
 		}
 		return filepath.Join(".config/ocgo", rel), nil
 	}
-	if strings.HasPrefix(path, codexDir) {
+	if isWithin(codexDir, path) {
 		rel, err := filepath.Rel(codexDir, path)
 		if err != nil {
 			return "", err
@@ -305,14 +331,19 @@ func addFileToZip(zw *zip.Writer, src, name string) error {
 }
 
 type RestoreOptions struct {
-	DryRun bool
-	Yes    bool
+	DryRun             bool
+	Yes                bool
+	IncludeCodexConfig bool
 }
 
-func Restore(backupPath string, opts RestoreOptions) error {
+type RestoreResult struct {
+	Files []string `json:"files"`
+}
+
+func Restore(backupPath string, opts RestoreOptions) (RestoreResult, error) {
 	zr, err := zip.OpenReader(backupPath)
 	if err != nil {
-		return fmt.Errorf("cannot open backup: %w", err)
+		return RestoreResult{}, fmt.Errorf("cannot open backup: %w", err)
 	}
 	defer zr.Close()
 
@@ -320,9 +351,15 @@ func Restore(backupPath string, opts RestoreOptions) error {
 	hasManifest := false
 	for _, f := range zr.File {
 		if f.Name == "backup-manifest.json" {
-			rc, _ := f.Open()
-			b, _ := io.ReadAll(rc)
+			rc, err := f.Open()
+			if err != nil {
+				return RestoreResult{}, fmt.Errorf("failed to open manifest: %w", err)
+			}
+			b, err := io.ReadAll(rc)
 			rc.Close()
+			if err != nil {
+				return RestoreResult{}, fmt.Errorf("failed to read manifest: %w", err)
+			}
 			if json.Unmarshal(b, &manifest) == nil {
 				hasManifest = true
 			}
@@ -330,11 +367,14 @@ func Restore(backupPath string, opts RestoreOptions) error {
 		}
 	}
 	if !hasManifest {
-		return errors.New("backup does not contain backup-manifest.json")
+		return RestoreResult{}, errors.New("backup does not contain backup-manifest.json")
 	}
 
 	ocgoDir := config.ConfigDir()
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return RestoreResult{}, fmt.Errorf("cannot determine home directory: %w", err)
+	}
 
 	var toRestore []string
 	for _, f := range zr.File {
@@ -342,78 +382,61 @@ func Restore(backupPath string, opts RestoreOptions) error {
 			continue
 		}
 		name := filepath.ToSlash(f.Name)
-		if err := validateRestorePath(name, homeDir, ocgoDir); err != nil {
-			return fmt.Errorf("invalid path in backup %q: %w", name, err)
+		clean := filepath.Clean(filepath.FromSlash(name))
+		if strings.HasPrefix(clean, "..") || strings.Contains(clean, ".."+string(filepath.Separator)) {
+			return RestoreResult{}, fmt.Errorf("invalid path in backup %q: contains parent directory reference", name)
+		}
+		if filepath.IsAbs(clean) {
+			return RestoreResult{}, fmt.Errorf("invalid path in backup %q: absolute path not allowed", name)
+		}
+		abs := filepath.Join(homeDir, clean)
+		if !isWithin(ocgoDir, abs) && !isWithin(filepath.Dir(config.CodexConfigFile()), abs) {
+			return RestoreResult{}, fmt.Errorf("invalid path in backup %q: outside allowed directories", name)
+		}
+		if clean == ".codex/config.toml" && !opts.IncludeCodexConfig {
+			return RestoreResult{}, fmt.Errorf("backup contains .codex/config.toml; pass --include-codex-config to restore it")
 		}
 		toRestore = append(toRestore, name)
 	}
 
-	fmt.Printf("Backup created at: %s\n", manifest.CreatedAt)
-	fmt.Printf("Files to restore:\n")
-	for _, name := range toRestore {
-		fmt.Printf("  %s\n", restoreTargetPath(name, homeDir, ocgoDir))
-	}
-
 	if opts.DryRun {
-		return nil
+		return RestoreResult{Files: toRestore}, nil
 	}
 	if !opts.Yes {
-		return errors.New("refusing to continue without --yes in non-interactive mode")
+		return RestoreResult{}, errors.New("refusing to continue without --yes")
 	}
 
 	prePath := filepath.Join(ocgoDir, "backups", fmt.Sprintf("pre-restore-%s.zip", time.Now().UTC().Format("20060102-150405")))
-	preResult, err := Backup(prePath, false)
-	if err != nil {
-		return fmt.Errorf("pre-restore backup failed: %w", err)
+	if _, err := Backup(prePath, false); err != nil {
+		return RestoreResult{}, fmt.Errorf("pre-restore backup failed: %w", err)
 	}
-	fmt.Printf("Pre-restore backup created: %s (%d files)\n", preResult.Path, preResult.FileCount)
 
 	for _, name := range toRestore {
-		abs := restoreTargetPath(name, homeDir, ocgoDir)
-		os.MkdirAll(filepath.Dir(abs), 0755)
+		abs := filepath.Join(homeDir, filepath.Clean(filepath.FromSlash(name)))
+		dir := filepath.Dir(abs)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return RestoreResult{}, fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
 		for _, zf := range zr.File {
 			if filepath.ToSlash(zf.Name) != name {
 				continue
 			}
-			rc, _ := zf.Open()
-			b, _ := io.ReadAll(rc)
+			rc, err := zf.Open()
+			if err != nil {
+				return RestoreResult{}, fmt.Errorf("failed to open %s in backup: %w", name, err)
+			}
+			b, err := io.ReadAll(rc)
 			rc.Close()
-			os.WriteFile(abs, b, 0644)
-			break
-		}
-		fmt.Printf("  Restored: %s\n", abs)
-	}
-	return nil
-}
-
-func validateRestorePath(zipPath, homeDir, ocgoDir string) error {
-	clean := filepath.Clean(filepath.FromSlash(zipPath))
-	if strings.HasPrefix(clean, "..") || strings.Contains(clean, ".."+string(filepath.Separator)) {
-		return errors.New("path contains parent directory reference")
-	}
-	if filepath.IsAbs(clean) {
-		return errors.New("absolute path not allowed")
-	}
-	abs := filepath.Join(homeDir, clean)
-	allowed := []string{ocgoDir}
-	if codexDir := filepath.Dir(config.CodexConfigFile()); codexDir != "" {
-		allowed = append(allowed, codexDir)
-	}
-	valid := false
-	for _, a := range allowed {
-		if strings.HasPrefix(abs, a) {
-			valid = true
+			if err != nil {
+				return RestoreResult{}, fmt.Errorf("failed to read %s from backup: %w", name, err)
+			}
+			if err := os.WriteFile(abs, b, 0644); err != nil {
+				return RestoreResult{}, fmt.Errorf("failed to write %s: %w", abs, err)
+			}
 			break
 		}
 	}
-	if !valid {
-		return fmt.Errorf("path %s is outside allowed directories", clean)
-	}
-	return nil
-}
-
-func restoreTargetPath(zipPath, homeDir, ocgoDir string) string {
-	return filepath.Join(homeDir, filepath.Clean(filepath.FromSlash(zipPath)))
+	return RestoreResult{Files: toRestore}, nil
 }
 
 type ResetScope string
@@ -434,52 +457,58 @@ type ResetOptions struct {
 	NoBackup       bool
 }
 
-func Reset(opts ResetOptions) error {
+type ResetResult struct {
+	Scope    ResetScope `json:"scope"`
+	Removed  []string   `json:"removed"`
+	Backup   string     `json:"backup,omitempty"`
+}
+
+func Reset(opts ResetOptions) (ResetResult, error) {
 	if opts.NoBackup && !opts.Yes {
-		return errors.New("--no-backup requires --yes")
+		return ResetResult{}, errors.New("--no-backup requires --yes")
 	}
+
 	p := AllPaths()
-	files := resolveScopeFiles(opts.Scope, p)
+	files := resolveScopeFiles(opts, p)
 
 	if len(files) == 0 && opts.Scope != ResetScopeCodexDesktop {
-		fmt.Println("Nothing to reset for this scope.")
-		return nil
+		return ResetResult{Scope: opts.Scope}, nil
 	}
 
-	fmt.Printf("Scope: %s\n", opts.Scope)
-	fmt.Printf("Files to remove:\n")
-	for _, f := range files {
-		fmt.Printf("  %s\n", f)
-	}
-	if opts.Scope == ResetScopeCodexDesktop {
-		fmt.Println("  (codex-desktop: run 'ocgo codex desktop enable chatgpt' to restore)")
-	}
 	if opts.DryRun {
-		return nil
+		return ResetResult{Scope: opts.Scope, Removed: files}, nil
 	}
 	if !opts.Yes {
-		return errors.New("refusing to continue without --yes")
+		return ResetResult{}, errors.New("refusing to continue without --yes")
 	}
+
+	var backupPath string
 	if !opts.NoBackup {
 		bDir := filepath.Join(config.ConfigDir(), "backups")
-		os.MkdirAll(bDir, 0755)
+		if err := os.MkdirAll(bDir, 0755); err != nil {
+			return ResetResult{}, fmt.Errorf("failed to create backup directory: %w", err)
+		}
 		bPath := filepath.Join(bDir, fmt.Sprintf("pre-reset-%s.zip", time.Now().UTC().Format("20060102-150405")))
 		result, err := Backup(bPath, false)
 		if err != nil {
-			return fmt.Errorf("pre-reset backup failed: %w", err)
+			return ResetResult{}, fmt.Errorf("pre-reset backup failed: %w", err)
 		}
-		fmt.Printf("Backup created: %s (%d files)\n", result.Path, result.FileCount)
+		backupPath = result.Path
 	}
+
+	removed := make([]string, 0, len(files))
 	for _, f := range files {
 		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to remove %s: %w", f, err)
+			return ResetResult{}, fmt.Errorf("failed to remove %s: %w", f, err)
 		}
-		fmt.Printf("  Removed: %s\n", f)
+		removed = append(removed, f)
 	}
-	return nil
+
+	return ResetResult{Scope: opts.Scope, Removed: removed, Backup: backupPath}, nil
 }
 
-func resolveScopeFiles(scope ResetScope, p Paths) []string {
+func resolveScopeFiles(opts ResetOptions, p Paths) []string {
+	scope := opts.Scope
 	switch scope {
 	case ResetScopeOcgo:
 		return filterExisting([]string{
@@ -491,14 +520,36 @@ func resolveScopeFiles(scope ResetScope, p Paths) []string {
 	case ResetScopeCodexCLI:
 		return filterExisting([]string{p.CodexProfileFile, p.CodexCatalogFile})
 	case ResetScopeCodexDesktop:
-		return nil
+		return filterExisting([]string{p.DesktopStateFile})
 	case ResetScopeAll:
-		files := resolveScopeFiles(ResetScopeOcgo, p)
-		files = append(files, resolveScopeFiles(ResetScopeCache, p)...)
-		files = append(files, resolveScopeFiles(ResetScopeCodexCLI, p)...)
+		files := resolveScopeFiles(ResetOptions{Scope: ResetScopeOcgo}, p)
+		files = append(files, resolveScopeFiles(ResetOptions{Scope: ResetScopeCache}, p)...)
+		files = append(files, resolveScopeFiles(ResetOptions{Scope: ResetScopeCodexCLI}, p)...)
+		if opts.IncludeBackups {
+			files = appendBackupFiles(files, p)
+		}
 		return files
 	}
 	return nil
+}
+
+func appendBackupFiles(files []string, p Paths) []string {
+	backupsDir := filepath.Join(config.ConfigDir(), "backups")
+	if entries, err := os.ReadDir(backupsDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				files = append(files, filepath.Join(backupsDir, e.Name()))
+			}
+		}
+	}
+	if entries, err := os.ReadDir(p.CodexBackupsDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				files = append(files, filepath.Join(p.CodexBackupsDir, e.Name()))
+			}
+		}
+	}
+	return files
 }
 
 func filterExisting(paths []string) []string {
