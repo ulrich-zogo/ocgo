@@ -8,6 +8,9 @@ on:
       - "docs/homebrew.md"
       - "docs/release.md"
 
+permissions:
+  contents: read
+
 jobs:
   brew-install:
     runs-on: macos-latest
@@ -17,6 +20,9 @@ jobs:
 
       - name: Install ocgo
         run: brew install ocgo
+
+      - name: Run Homebrew formula test
+        run: brew test ocgo
 
       - name: Verify binary
         run: |

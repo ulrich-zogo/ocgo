@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 APP_NAME="${APP_NAME:-ocgo}"
 REPO="${GITHUB_REPOSITORY:-ulrich-zogo/ocgo}"
 HOMEBREW_TAP_REPO="${HOMEBREW_TAP_REPO:-ulrich-zogo/homebrew-tap}"
@@ -77,6 +79,9 @@ EOF_FORMULA
 
   git config user.name "github-actions[bot]"
   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+  # Verify formula before pushing.
+  "$SCRIPT_DIR/verify-homebrew-formula.sh" "$TAG" "$TAP_TMP/Formula/${APP_NAME}.rb"
 
   git add "Formula/${APP_NAME}.rb"
   if git diff --cached --quiet; then

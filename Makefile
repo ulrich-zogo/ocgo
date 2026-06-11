@@ -1,4 +1,6 @@
-.PHONY: build run test clean install release check-fork-ownership build-release update-homebrew-formula ci
+.PHONY: build run test clean install release check-fork-ownership build-release update-homebrew-formula verify-release verify-homebrew-formula ci
+
+FORMULA_PATH ?= Formula/ocgo.rb
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 EXE := $(shell go env GOEXE)
@@ -42,3 +44,11 @@ build-release:
 update-homebrew-formula:
 	@[ -n "$(TAG)" ] || (echo "Usage: make update-homebrew-formula TAG=v0.2.0" && exit 1)
 	./scripts/update-homebrew-formula.sh "$(TAG)" dist/checksums.txt
+
+verify-release:
+	@[ -n "$(TAG)" ] || (echo "Usage: make verify-release TAG=v0.1.0" && exit 1)
+	./scripts/verify-release-artifacts.sh "$(TAG)" dist
+
+verify-homebrew-formula:
+	@[ -n "$(TAG)" ] || (echo "Usage: make verify-homebrew-formula TAG=v0.1.0 FORMULA_PATH=$(FORMULA_PATH)" && exit 1)
+	./scripts/verify-homebrew-formula.sh "$(TAG)" "$(FORMULA_PATH)"

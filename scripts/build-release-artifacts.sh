@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 APP_NAME="${APP_NAME:-ocgo}"
 CMD_PATH="${CMD_PATH:-./cmd/ocgo}"
 TAG="${1:-${TAG:-}}"
@@ -68,3 +70,6 @@ build_one windows arm64
 
 echo "Release artifacts built in $DIST_DIR:"
 ls -la "$DIST_DIR"
+
+# Verify artifacts immediately.
+"$SCRIPT_DIR/verify-release-artifacts.sh" "$TAG" "$DIST_DIR"

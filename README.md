@@ -103,7 +103,7 @@ or:
 brew install ulrich-zogo/tap/ocgo
 ```
 
-Until the tap is published, use the source build above. See [docs/homebrew.md](docs/homebrew.md) for details on creating and publishing the tap repository.
+Until the tap is published, use the source build above. See [docs/homebrew.md](docs/homebrew.md) for details on creating and publishing the tap repository. See [docs/release.md](docs/release.md) and [docs/release-rollback.md](docs/release-rollback.md) for the release process and rollback procedures.
 
 ## Setup
 
@@ -464,7 +464,7 @@ bin/ocgo setup
 make release TAG=v0.2.0
 ```
 
-Requires `gh` (GitHub CLI) for creating releases and updating the Homebrew formula. See [docs/release.md](docs/release.md) for the full release process, including automated CI releases.
+Requires `gh` (GitHub CLI) for creating releases and updating the Homebrew formula. See [docs/release.md](docs/release.md) for the full release process and [docs/release-rollback.md](docs/release-rollback.md) for rollback procedures.
 
 ## Upgrading from earlier versions
 
