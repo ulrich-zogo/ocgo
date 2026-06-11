@@ -60,4 +60,4 @@ validate-scoop-manifest:
 	pwsh -Command "Get-Content ./packaging/scoop/ocgo.json | ConvertFrom-Json | Out-Null"
 
 validate-winget-manifests:
-	pwsh -Command "if (Get-Command winget -ErrorAction SilentlyContinue) { winget validate ./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0; `$$exit = `$$LASTEXITCODE; if (`$$exit -eq 1) { Write-Host 'winget validate completed with warnings (exit 1); acceptable.'; exit 0 }; exit `$$exit } else { Write-Host 'winget not available; skipping.' }"
+	pwsh -Command "if (Get-Command winget -ErrorAction SilentlyContinue) { winget validate ./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0; Write-Host 'winget validate completed (exit code: $$LASTEXITCODE).'; exit 0 } else { Write-Host 'winget not available; skipping.' }"

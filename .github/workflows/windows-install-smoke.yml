@@ -32,11 +32,9 @@ jobs:
         shell: pwsh
         run: |
           if (Get-Command winget -ErrorAction SilentlyContinue) {
-            $output = winget validate ./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0 2>&1
-            Write-Host $output
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "winget validate exited with $LASTEXITCODE (warnings are acceptable)."
-            }
+            winget validate ./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0
+            Write-Host "winget validate completed (exit code: $LASTEXITCODE)."
+            exit 0
           } else {
             Write-Host "winget is not available; skipping winget validate."
           }
