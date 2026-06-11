@@ -2,15 +2,18 @@ PackageIdentifier: UlrichZogo.OCGO
 PackageVersion: 0.1.0
 InstallerType: zip
 NestedInstallerType: portable
-NestedInstallerFiles:
-  - RelativeFilePath: ocgo_0.1.0_windows_x86_64/ocgo.exe
-    PortableCommandAlias: ocgo
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/ulrich-zogo/ocgo/releases/download/v0.1.0/ocgo_0.1.0_windows_x86_64.zip
     InstallerSha256: 08b3a7cd284e2f65e3439c353d296312d597f19c99866666a56039f6ac28afc4
+    NestedInstallerFiles:
+      - RelativeFilePath: ocgo_0.1.0_windows_x86_64/ocgo.exe
+        PortableCommandAlias: ocgo
   - Architecture: arm64
     InstallerUrl: https://github.com/ulrich-zogo/ocgo/releases/download/v0.1.0/ocgo_0.1.0_windows_arm64.zip
     InstallerSha256: bd0084a1e37dd5b23d6720ba2a911386c3b7ef873753c3364ed15f39cbbe1741
+    NestedInstallerFiles:
+      - RelativeFilePath: ocgo_0.1.0_windows_arm64/ocgo.exe
+        PortableCommandAlias: ocgo
 ManifestType: installer
 ManifestVersion: 1.9.0

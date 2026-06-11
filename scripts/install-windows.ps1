@@ -103,7 +103,14 @@ try {
         New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     }
 
-    Copy-Item -Path $exePath -Destination (Join-Path $InstallDir "ocgo.exe") -Force:$Force
+    $destExe = Join-Path $InstallDir "ocgo.exe"
+
+    if ((Test-Path $destExe) -and -not $Force) {
+        Write-Error "ocgo.exe already exists at $destExe. Use -Force to reinstall."
+        exit 1
+    }
+
+    Copy-Item -Path $exePath -Destination $destExe -Force
     Write-Host "Installed ocgo.exe to $InstallDir"
 
 } finally {

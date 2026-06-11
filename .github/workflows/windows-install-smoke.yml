@@ -33,8 +33,10 @@ jobs:
         run: |
           if (Get-Command winget -ErrorAction SilentlyContinue) {
             winget validate ./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0
+            if ($LASTEXITCODE -gt 1) {
+              exit $LASTEXITCODE
+            }
             Write-Host "winget validate completed (exit code: $LASTEXITCODE)."
-            exit 0
           } else {
             Write-Host "winget is not available; skipping winget validate."
           }
