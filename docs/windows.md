@@ -95,6 +95,12 @@ Local validation:
 winget validate .\packaging\winget\manifests\u\UlrichZogo\OCGO\0.1.0
 ```
 
+Or validate YAML syntax without winget:
+
+```powershell
+Get-ChildItem .\packaging\winget\manifests\u\UlrichZogo\OCGO\0.1.0 -Filter *.yaml | ForEach-Object { $content = Get-Content $_.FullName -Raw; $null = [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$null, [ref]$errors); if ($errors.Count -gt 0) { Write-Error "$($_.Name): $($errors -join '; ')" } else { Write-Host "$($_.Name): valid" } }
+```
+
 ## Verify installation
 
 ```powershell

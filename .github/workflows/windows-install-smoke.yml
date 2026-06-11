@@ -28,15 +28,16 @@ jobs:
         shell: pwsh
         run: Get-Content ./packaging/scoop/ocgo.json | ConvertFrom-Json | Out-Null
 
-      - name: Validate WinGet manifests if available
+      - name: Validate WinGet manifests
         shell: pwsh
         run: |
-          if (Get-Command winget -ErrorAction SilentlyContinue) {
-            winget validate ./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0
-            if ($LASTEXITCODE -gt 1) {
-              exit $LASTEXITCODE
+          $root = "./packaging/winget/manifests/u/UlrichZogo/OCGO/0.1.0"
+          Get-ChildItem $root -Filter *.yaml | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw
+            $null = [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$null, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              Write-Error "YAML parse errors in $($_.Name): $($errors -join '; ')"
+              exit 1
             }
-            Write-Host "winget validate completed (exit code: $LASTEXITCODE)."
-          } else {
-            Write-Host "winget is not available; skipping winget validate."
+            Write-Host "$($_.Name): valid"
           }
