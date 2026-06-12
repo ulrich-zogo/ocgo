@@ -183,7 +183,7 @@ func (m Manager) Stop(cfg config.Config) error {
 	}
 
 	if !healthyFn(base) && pid > 0 {
-		switch process.StatusForPID(pid) {
+		switch statusForPIDFn(pid) {
 		case process.StatusStale:
 			_ = RemoveState(m.StateFile)
 			_ = osRemoveFile(config.PIDFile())
@@ -241,7 +241,7 @@ func cleanStalePID(cfg config.Config) {
 	if err != nil || pid <= 0 {
 		return
 	}
-	ps := process.StatusForPID(pid)
+	ps := statusForPIDFn(pid)
 	if ps == process.StatusStale {
 		os.Remove(config.PIDFile())
 		RemoveState(DaemonStateFile())

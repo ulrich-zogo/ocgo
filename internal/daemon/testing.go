@@ -14,15 +14,17 @@ var (
 	killPIDFn         = process.KillPID
 	startBackgroundFn = process.StartBackground
 	waitHealthyFn     = process.WaitHealthy
+	statusForPIDFn    = process.StatusForPID
 )
 
 type Runtime struct {
-	Healthy         func(base string) bool
-	ReadPID         func() (int, error)
-	FindListenerPID func(port int) (int, error)
-	KillPID         func(pid int) error
-	StartBackground func() error
-	WaitHealthy     func(base string, timeout time.Duration) error
+	Healthy           func(base string) bool
+	ReadPID           func() (int, error)
+	FindListenerPID   func(port int) (int, error)
+	KillPID           func(pid int) error
+	StartBackground   func() error
+	WaitHealthy       func(base string, timeout time.Duration) error
+	StatusForPID      func(pid int) process.ProcessStatus
 }
 
 func SetRuntimeForTest(r Runtime) (restore func()) {
@@ -32,6 +34,7 @@ func SetRuntimeForTest(r Runtime) (restore func()) {
 	prevKill := killPIDFn
 	prevStart := startBackgroundFn
 	prevWait := waitHealthyFn
+	prevStatus := statusForPIDFn
 	if r.Healthy != nil {
 		healthyFn = r.Healthy
 	}
@@ -50,6 +53,9 @@ func SetRuntimeForTest(r Runtime) (restore func()) {
 	if r.WaitHealthy != nil {
 		waitHealthyFn = r.WaitHealthy
 	}
+	if r.StatusForPID != nil {
+		statusForPIDFn = r.StatusForPID
+	}
 	return func() {
 		healthyFn = prevHealthy
 		readPIDFn = prevRead
@@ -57,5 +63,6 @@ func SetRuntimeForTest(r Runtime) (restore func()) {
 		killPIDFn = prevKill
 		startBackgroundFn = prevStart
 		waitHealthyFn = prevWait
+		statusForPIDFn = prevStatus
 	}
 }
