@@ -131,6 +131,23 @@ JSON output never contains API keys or bearer tokens. If `doctor --json`
 reports failing checks, it may return a non-zero exit code while still
 printing valid JSON.
 
+## Verify the real daemon process
+
+If daemon start/status/stop behaves unexpectedly, run the opt-in real daemon
+smoke test:
+
+```bash
+OCGO_E2E_REAL_DAEMON=1 go test ./internal/e2e -run RealDaemon -v
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:OCGO_E2E_REAL_DAEMON = "1"
+go test ./internal/e2e -run RealDaemon -v
+Remove-Item Env:\OCGO_E2E_REAL_DAEMON
+```
+
 ## Doctor diagnostics overview
 
 ```bash

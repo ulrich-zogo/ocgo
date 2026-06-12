@@ -67,3 +67,7 @@ validate-winget-manifests:
 
 e2e-smoke:
 	go test ./internal/e2e -run E2E -v
+
+.PHONY: real-daemon-smoke
+real-daemon-smoke:
+	OCGO_E2E_REAL_DAEMON=1 go test ./internal/e2e -run RealDaemon -v
