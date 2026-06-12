@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -17,11 +16,9 @@ func VersionCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			info := buildinfo.Current()
 
-			if jsonOut {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(info)
-			}
+	if jsonOut {
+			return writeJSON(cmd.OutOrStdout(), info)
+		}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "ocgo version %s\n", info.Version)
 			fmt.Fprintf(cmd.OutOrStdout(), "commit: %s\n", info.Commit)

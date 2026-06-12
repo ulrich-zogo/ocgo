@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,9 +29,7 @@ func configPathsCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p := configlifecycle.AllPaths()
 			if jsonOut {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(p)
+				return writeJSON(cmd.OutOrStdout(), p)
 			}
 			fmt.Fprint(cmd.OutOrStdout(), "OCGO configuration paths:\n")
 			fmt.Fprintf(cmd.OutOrStdout(), "  ocgo config dir:      %s\n", p.ConfigDir)
@@ -63,9 +60,7 @@ func configInspectCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ins := configlifecycle.Inspect()
 			if jsonOut {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(ins)
+				return writeJSON(cmd.OutOrStdout(), ins)
 			}
 			fmt.Fprint(cmd.OutOrStdout(), "OCGO configuration inspection:\n")
 			fmt.Fprintln(cmd.OutOrStdout(), "\nCore:")

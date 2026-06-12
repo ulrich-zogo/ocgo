@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -43,9 +42,7 @@ and redacted logs. It is safe to attach to bug reports.`,
 				return err
 			}
 			if jsonOut {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(result)
+				return writeJSON(cmd.OutOrStdout(), result)
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "OCGO support bundle created:")
