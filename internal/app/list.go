@@ -14,9 +14,9 @@ func ListCmd() *cobra.Command {
 		Short:   "List OpenCode Go models",
 		Run: func(cmd *cobra.Command, args []string) {
 			models.RefreshAll()
-			fmt.Println("OpenCode Go models:")
+			fmt.Fprintln(cmd.OutOrStdout(), "OpenCode Go models:")
 			for _, m := range models.KnownIDs() {
-				fmt.Printf("  %s\n", m)
+				fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", m)
 			}
 		},
 	}

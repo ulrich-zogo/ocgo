@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,10 +12,31 @@ import (
 	"testing"
 	"time"
 
-	"ocgo/internal/codex"
 	"ocgo/internal/config"
 	"ocgo/internal/daemon"
+	"ocgo/internal/process"
 )
+
+var expectedOfficialModels = []string{
+	"minimax-m3",
+	"minimax-m2.7",
+	"minimax-m2.5",
+	"kimi-k2.6",
+	"kimi-k2.5",
+	"glm-5.1",
+	"glm-5",
+	"deepseek-v4-pro",
+	"deepseek-v4-flash",
+	"qwen3.7-max",
+	"qwen3.7-plus",
+	"qwen3.6-plus",
+	"qwen3.5-plus",
+	"mimo-v2-pro",
+	"mimo-v2-omni",
+	"mimo-v2.5-pro",
+	"mimo-v2.5",
+	"hy3-preview",
+}
 
 func TestE2EFreshConfigDiagnosticsWorkflow(t *testing.T) {
 	dir := newTempHome(t)
@@ -85,10 +107,15 @@ func TestE2EModelSelectionWorkflow(t *testing.T) {
 	os.MkdirAll(ocgoDir, 0755)
 	writeFile(t, filepath.Join(ocgoDir, "config.json"), `{"api_key":"test","host":"127.0.0.1","port":3456}`)
 
-	out := runOCGOSuccess(t, "opencode", "model", "current")
-	if !strings.Contains(out, "minimax-m3") {
-		t.Logf("model current output: %s", out)
+	out := runOCGOSuccess(t, "models")
+	for _, model := range expectedOfficialModels {
+		if !strings.Contains(out, model) {
+			t.Errorf("models output missing %q", model)
+		}
 	}
+
+	out = runOCGOSuccess(t, "opencode", "model", "current")
+	_ = out
 
 	runOCGOSuccess(t, "opencode", "model", "set-default", "minimax-m3")
 	out = runOCGOSuccess(t, "opencode", "model", "current")
@@ -155,9 +182,6 @@ func TestE2EDaemonWorkflow(t *testing.T) {
 
 	out := runOCGOSuccess(t, "daemon", "status", "--json")
 	assertJSONValid(t, out)
-	if strings.Contains(out, `"health": "ok"`) {
-		t.Log("daemon status shows healthy before start")
-	}
 
 	runOCGOSuccess(t, "daemon", "start")
 
@@ -206,19 +230,48 @@ func TestE2EStalePIDAndLockWorkflow(t *testing.T) {
 	writeFile(t, filepath.Join(ocgoDir, "config.json"),
 		`{"api_key":"test-key","host":"127.0.0.1","port":`+itoa(port)+`}`)
 
-	writeFile(t, filepath.Join(ocgoDir, "ocgo.pid"), "99999999\n")
+	pidPath := filepath.Join(ocgoDir, "ocgo.pid")
+	lockPath := filepath.Join(ocgoDir, "daemon.lock")
+	writeFile(t, pidPath, "99999999\n")
 	lock := `{"pid":99999999,"created_at":"2024-01-01T00:00:00Z"}` + "\n"
-	writeFile(t, filepath.Join(ocgoDir, "daemon.lock"), lock)
+	writeFile(t, lockPath, lock)
 
 	stateFile := filepath.Join(ocgoDir, "daemon-state.json")
 	t.Setenv("OCGO_DAEMON_STATE_FILE", stateFile)
 
+	stalePIDContent, _ := os.ReadFile(pidPath)
+	if !strings.Contains(string(stalePIDContent), "99999999") {
+		t.Fatal("stale pid file not set up correctly")
+	}
+	staleLockContent, _ := os.ReadFile(lockPath)
+	if !strings.Contains(string(staleLockContent), "99999999") {
+		t.Fatal("stale lock file not set up correctly")
+	}
+
 	healthy := atomic.Bool{}
+	stalePID := 99999999
 	restore := daemon.SetRuntimeForTest(daemon.Runtime{
 		Healthy: func(base string) bool { return healthy.Load() },
-		ReadPID: func() (int, error) { return 0, nil },
+		ReadPID: func() (int, error) {
+			b, err := os.ReadFile(pidPath)
+			if err != nil {
+				return 0, err
+			}
+			var pid int
+			n, _ := fmt.Sscanf(strings.TrimSpace(string(b)), "%d", &pid)
+			if n > 0 {
+				return pid, nil
+			}
+			return 0, nil
+		},
 		FindListenerPID: func(port int) (int, error) { return 0, nil },
-		KillPID:         func(pid int) error { return nil },
+		KillPID: func(pid int) error { return nil },
+		StatusForPID: func(pid int) process.ProcessStatus {
+			if pid == stalePID {
+				return process.StatusStale
+			}
+			return process.StatusPresent
+		},
 		StartBackground: func() error { healthy.Store(true); return nil },
 		WaitHealthy:     func(base string, timeout time.Duration) error { return nil },
 	})
@@ -231,8 +284,23 @@ func TestE2EStalePIDAndLockWorkflow(t *testing.T) {
 
 	runOCGOSuccess(t, "daemon", "start")
 
+	afterPID, err := os.ReadFile(pidPath)
+	if err == nil && strings.Contains(string(afterPID), "99999999") {
+		t.Fatal("stale PID was not cleaned or replaced after start")
+	}
+
+	afterLock, err := os.ReadFile(lockPath)
+	if err == nil && strings.Contains(string(afterLock), "99999999") {
+		t.Fatal("stale daemon lock was not cleaned or replaced after start")
+	}
+
+	assertFileExists(t, stateFile)
+
 	out := runOCGOSuccess(t, "daemon", "status", "--json")
 	assertJSONValid(t, out)
+	if !strings.Contains(out, `"health": "ok"`) {
+		t.Errorf("daemon status should be healthy after stale cleanup, got: %s", out)
+	}
 }
 
 func TestE2ECodexCLIConfigWorkflow(t *testing.T) {
@@ -276,12 +344,28 @@ func TestE2ECodexCLIConfigWorkflow(t *testing.T) {
 	if err := json.Unmarshal(catalog, &catalogData); err != nil {
 		t.Fatalf("catalog JSON invalid: %v\n%s", err, string(catalog))
 	}
-	if len(catalogData.Models) == 0 {
-		t.Error("catalog has no models")
+	if len(catalogData.Models) != 18 {
+		t.Fatalf("codex model catalog has %d models, want 18", len(catalogData.Models))
+	}
+	catalogIDs := make(map[string]bool)
+	for _, m := range catalogData.Models {
+		slug, _ := m["slug"].(string)
+		if slug != "" {
+			catalogIDs[slug] = true
+		}
+	}
+	for _, model := range expectedOfficialModels {
+		if !catalogIDs[model] {
+			t.Errorf("codex model catalog missing %q", model)
+		}
 	}
 }
 
 func TestE2ECodexDesktopSwitchRestoreWorkflow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Codex Desktop workflow in short mode")
+	}
+
 	dir := newTempHome(t)
 	port := freePort(t)
 
@@ -294,54 +378,39 @@ func TestE2ECodexDesktopSwitchRestoreWorkflow(t *testing.T) {
 
 	codexDir := filepath.Join(dir, ".codex")
 	os.MkdirAll(codexDir, 0755)
-	writeFile(t, filepath.Join(codexDir, "config.toml"),
-		`model = "gpt-5"`+"\n"+`model_provider = "openai"`+"\n")
+	originalContent := `model = "gpt-5"` + "\n" + `model_provider = "openai"` + "\n"
+	writeFile(t, filepath.Join(codexDir, "config.toml"), originalContent)
 
-	mgr := codex.Manager{Paths: codex.Paths{
-		ConfigFile:       filepath.Join(codexDir, "config.toml"),
-		ProfileFile:      filepath.Join(codexDir, "ocgo-launch.config.toml"),
-		ModelCatalogFile: filepath.Join(codexDir, "ocgo-models.json"),
-		DesktopConfigFile: filepath.Join(codexDir, "config.toml"),
-		BackupDir:        filepath.Join(ocgoDir, "codex-backups"),
-	}}
+	healthy := atomic.Bool{}
+	restore := daemon.SetRuntimeForTest(daemon.Runtime{
+		Healthy:             func(base string) bool { return healthy.Load() },
+		ReadPID:             func() (int, error) { return 0, nil },
+		FindListenerPID:     func(port int) (int, error) { return 0, nil },
+		KillPID:             func(pid int) error { return nil },
+		StatusForPID:        func(pid int) process.ProcessStatus { return process.StatusUnknown },
+		StartBackground:     func() error { healthy.Store(true); return nil },
+		WaitHealthy:         func(base string, timeout time.Duration) error { return nil },
+	})
+	t.Cleanup(restore)
+	t.Cleanup(func() {
+		healthy.Store(false)
+		runOCGO(t, "daemon", "stop")
+	})
 
-	originalContent, _ := os.ReadFile(filepath.Join(codexDir, "config.toml"))
-
-	status, err := mgr.DesktopStatus()
+	out, _, err := runOCGO(t, "codex", "desktop", "status")
 	if err != nil {
-		t.Fatal(err)
+		t.Logf("desktop status before enable (acceptable without setup): %v", err)
 	}
-	_ = status
 
-	base := "http://127.0.0.1:" + itoa(port)
-	st, err := mgr.EnableDesktopOpenCode(base, "minimax-m3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.Mode != codex.DesktopModeOpenCode {
-		t.Errorf("mode = %s, want opencode", st.Mode)
-	}
-	if st.Model != "minimax-m3" {
-		t.Errorf("model = %s, want minimax-m3", st.Model)
-	}
-	if st.BaseURL != base+"/v1/" {
-		t.Errorf("base_url = %s, want %s/v1/", st.BaseURL, base)
+	runOCGOSuccess(t, "codex", "desktop", "enable", "opencode", "--model", "minimax-m3")
+
+	out = runOCGOSuccess(t, "codex", "desktop", "status")
+	if !strings.Contains(out, "opencode") {
+		t.Fatalf("desktop status should mention opencode, got:\n%s", out)
 	}
 
 	stateFile := filepath.Join(ocgoDir, "codex-desktop-state.json")
 	assertFileExists(t, stateFile)
-
-	desktopState, err := os.ReadFile(filepath.Join(codexDir, "config.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	desktopStr := string(desktopState)
-	if strings.Contains(desktopStr, "gpt-5") {
-		t.Errorf("desktop config still contains original model after enable opencode:\n%s", desktopStr)
-	}
-	if !strings.Contains(desktopStr, "minimax-m3") && !strings.Contains(desktopStr, base) {
-		t.Errorf("desktop config missing OCGO reference after enable opencode:\n%s", desktopStr)
-	}
 
 	backupDir := filepath.Join(ocgoDir, "codex-backups")
 	entries, err := os.ReadDir(backupDir)
@@ -349,16 +418,31 @@ func TestE2ECodexDesktopSwitchRestoreWorkflow(t *testing.T) {
 		t.Errorf("backup not created: %v, entries: %d", err, len(entries))
 	}
 
-	if _, err := mgr.EnableDesktopChatGPT(); err != nil {
+	configAfterOpenCode, err := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	if err != nil {
 		t.Fatal(err)
 	}
+	configStr := string(configAfterOpenCode)
+	if strings.Contains(configStr, "gpt-5") {
+		t.Errorf("desktop config still contains original model after enable opencode:\n%s", configStr)
+	}
+	if !strings.Contains(configStr, "minimax-m3") && !strings.Contains(configStr, itoa(port)) {
+		t.Errorf("desktop config missing OCGO reference after enable opencode:\n%s", configStr)
+	}
+
+	runOCGOSuccess(t, "codex", "desktop", "enable", "chatgpt")
 
 	restored, err := os.ReadFile(filepath.Join(codexDir, "config.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(restored) != string(originalContent) {
-		t.Errorf("restored content differs from original\n  got:  %q\n  want: %q", restored, originalContent)
+	if string(restored) != originalContent {
+		t.Fatalf("restored content differs from original\n  got:  %q\n  want: %q", restored, originalContent)
+	}
+
+	out = runOCGOSuccess(t, "codex", "desktop", "status")
+	if !strings.Contains(out, "chatgpt") {
+		t.Logf("desktop status after restore: %s", out)
 	}
 }
 
