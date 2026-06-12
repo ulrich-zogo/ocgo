@@ -206,6 +206,21 @@ func waitHTTPStatus(t *testing.T, url string, want int, timeout time.Duration) {
 	t.Fatalf("waitHTTPStatus(%s, %d) timed out after %v", url, want, timeout)
 }
 
+func waitHTTPUnavailable(t *testing.T, url string, timeout time.Duration) {
+	t.Helper()
+	client := http.Client{Timeout: 500 * time.Millisecond}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err != nil {
+			return
+		}
+		resp.Body.Close()
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatalf("%s still responds after %v", url, timeout)
+}
+
 func getJSON(t *testing.T, url string) []byte {
 	t.Helper()
 	client := http.Client{Timeout: 5 * time.Second}

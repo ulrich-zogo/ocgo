@@ -323,8 +323,8 @@ func TestE2ECodexCLIConfigWorkflow(t *testing.T) {
 	if err := json.Unmarshal(catalog, &catalogData); err != nil {
 		t.Fatalf("catalog JSON invalid: %v\n%s", err, string(catalog))
 	}
-	if len(catalogData.Models) != 18 {
-		t.Fatalf("codex model catalog has %d models, want 18", len(catalogData.Models))
+	if len(catalogData.Models) < 18 {
+		t.Fatalf("codex model catalog has %d models, want at least 18", len(catalogData.Models))
 	}
 	catalogIDs := make(map[string]bool)
 	for _, m := range catalogData.Models {

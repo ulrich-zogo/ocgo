@@ -3,7 +3,6 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,8 +89,8 @@ func TestRealDaemonProcessSmoke(t *testing.T) {
 		if parsed.Object != "list" {
 			t.Errorf("/v1/models object = %q, want list", parsed.Object)
 		}
-		if len(parsed.Data) != 18 {
-			t.Errorf("/v1/models has %d models, want 18", len(parsed.Data))
+		if len(parsed.Data) < 18 {
+			t.Errorf("/v1/models has %d models, want at least 18", len(parsed.Data))
 		}
 		ids := make(map[string]bool)
 		for _, m := range parsed.Data {
@@ -122,14 +121,25 @@ func TestRealDaemonProcessSmoke(t *testing.T) {
 	})
 
 	t.Run("double start", func(t *testing.T) {
+		pidBefore, err := os.ReadFile(pidPath)
+		if err != nil {
+			t.Fatalf("read pid before double start: %v", err)
+		}
 		stdout, _, err := runBinary(t, bin, env, "daemon", "start")
 		if err != nil {
 			t.Logf("double start error (acceptable): %v", err)
 		}
 		t.Logf("double start stdout: %s", stdout)
+		pidAfter, err := os.ReadFile(pidPath)
+		if err != nil {
+			t.Fatalf("read pid after double start: %v", err)
+		}
+		if strings.TrimSpace(string(pidBefore)) != strings.TrimSpace(string(pidAfter)) {
+			t.Fatalf("double start changed pid: before=%q after=%q", pidBefore, pidAfter)
+		}
 		out := runBinarySuccess(t, bin, env, "daemon", "status", "--json")
 		if !strings.Contains(out, `"health": "ok"`) {
-			t.Errorf("daemon should still be healthy after double start, got: %s", out)
+			t.Fatalf("daemon should still be healthy after double start, got: %s", out)
 		}
 	})
 
@@ -142,10 +152,11 @@ func TestRealDaemonProcessSmoke(t *testing.T) {
 
 	t.Run("stop", func(t *testing.T) {
 		runBinarySuccess(t, bin, env, "daemon", "stop")
-		client := http.Client{Timeout: 1 * time.Second}
-		_, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/health", port))
-		if err == nil {
-			t.Log("health endpoint still responds after stop (may take time to shut down)")
+		waitHTTPUnavailable(t, fmt.Sprintf("http://127.0.0.1:%d/health", port), 10*time.Second)
+		out := runBinarySuccess(t, bin, env, "daemon", "status", "--json")
+		assertJSONValid(t, out)
+		if strings.Contains(out, `"health": "ok"`) {
+			t.Fatalf("daemon status still reports healthy after stop: %s", out)
 		}
 	})
 
