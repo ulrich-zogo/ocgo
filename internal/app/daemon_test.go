@@ -138,11 +138,11 @@ func TestDaemonStatusHealthyWithStateMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "OCGO proxy is running, but daemon state is missing") {
-		t.Fatalf("output missing 'OCGO proxy is running, but daemon state is missing':\n%s", got)
+	if !strings.Contains(got, "health:         ok") {
+		t.Fatalf("output missing health status:\n%s", got)
 	}
-	if strings.Contains(got, "OCGO daemon is running\n") || strings.HasPrefix(got, "OCGO daemon is running") {
-		t.Fatalf("output should not say 'OCGO daemon is running' when state missing:\n%s", got)
+	if !strings.Contains(got, "state file:     missing") {
+		t.Fatalf("output missing state file status:\n%s", got)
 	}
 }
 
@@ -214,11 +214,11 @@ func TestDaemonStatusRunningFromState(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "OCGO daemon is running") {
-		t.Fatalf("output missing 'OCGO daemon is running':\n%s", got)
+	if !strings.Contains(got, "pid:            1234") {
+		t.Fatalf("output missing 'pid:            1234':\n%s", got)
 	}
-	if !strings.Contains(got, "PID: 1234") {
-		t.Fatalf("output missing 'PID: 1234':\n%s", got)
+	if !strings.Contains(got, "state file:     present") {
+		t.Fatalf("output missing state file status:\n%s", got)
 	}
 }
 

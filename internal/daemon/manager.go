@@ -10,6 +10,62 @@ import (
 	"ocgo/internal/process"
 )
 
+type DetailedStatus struct {
+	StateFile  string `json:"-"`
+	PIDFile    string `json:"-"`
+	StateFileStatus string `json:"state_file"`
+	PIDFileStatus   string `json:"pid_file"`
+	PID        int    `json:"pid"`
+	Process    string `json:"process"`
+	Health     string `json:"health"`
+	BaseURL    string `json:"base_url"`
+	LogFile    string `json:"log_file"`
+	StartedAt  string `json:"started_at"`
+}
+
+func (m Manager) DetailedStatus(cfg config.Config) DetailedStatus {
+	base := process.BaseURL(cfg)
+	ds := DetailedStatus{
+		StateFile:  m.StateFile,
+		PIDFile:    config.PIDFile(),
+		BaseURL:    base,
+		LogFile:    config.LogFile(),
+		StartedAt:  "unknown",
+	}
+
+	if _, err := os.Stat(m.StateFile); err == nil {
+		ds.StateFileStatus = "present"
+	} else {
+		ds.StateFileStatus = "missing"
+	}
+	if _, err := os.Stat(config.PIDFile()); err == nil {
+		ds.PIDFileStatus = "present"
+	} else {
+		ds.PIDFileStatus = "missing"
+	}
+
+	if st, err := ReadState(m.StateFile); err == nil {
+		ds.PID = st.PID
+		ds.StartedAt = st.StartedAt.UTC().Format(time.RFC3339)
+	} else if pid, err := readPIDFn(); err == nil && pid > 0 {
+		ds.PID = pid
+	}
+
+	if ds.PID > 0 {
+		ds.Process = string(process.StatusForPID(ds.PID))
+	} else {
+		ds.Process = "missing"
+	}
+
+	if healthyFn(base) {
+		ds.Health = "ok"
+	} else {
+		ds.Health = "unavailable"
+	}
+
+	return ds
+}
+
 type Status struct {
 	Running  bool
 	Healthy  bool
@@ -48,7 +104,14 @@ func DaemonStateFile() string {
 }
 
 func (m Manager) Start(cfg config.Config) (State, bool, error) {
+	release, err := AcquireLock()
+	if err != nil {
+		return State{}, false, err
+	}
+	defer release()
+
 	base := process.BaseURL(cfg)
+
 	if healthyFn(base) {
 		pid, _ := m.discoverPID(cfg)
 		if pid <= 0 {
@@ -68,6 +131,8 @@ func (m Manager) Start(cfg config.Config) (State, bool, error) {
 		}
 		return st, true, nil
 	}
+
+	cleanStalePID(cfg)
 
 	if err := startBackgroundFn(); err != nil {
 		return State{}, false, fmt.Errorf("start background server: %w", err)
@@ -102,6 +167,12 @@ func (m Manager) Start(cfg config.Config) (State, bool, error) {
 }
 
 func (m Manager) Stop(cfg config.Config) error {
+	release, err := AcquireLock()
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	base := process.BaseURL(cfg)
 	pid, _, _ := m.discoverPIDWithSource(cfg)
 
@@ -111,10 +182,22 @@ func (m Manager) Stop(cfg config.Config) error {
 		return ErrNotRunning
 	}
 
+	if !healthyFn(base) && pid > 0 {
+		switch statusForPIDFn(pid) {
+		case process.StatusStale:
+			_ = RemoveState(m.StateFile)
+			_ = osRemoveFile(config.PIDFile())
+			return ErrNotRunning
+		case process.StatusUnknown:
+			return fmt.Errorf("cannot safely determine daemon process status for pid %d", pid)
+		}
+	}
+
 	if pid > 0 {
 		if err := killPIDFn(pid); err != nil {
-			return fmt.Errorf("kill pid %d: %w", pid, err)
+			return fmt.Errorf("failed to stop OCGO daemon with pid %d: %w", pid, err)
 		}
+		waitPIDExit(pid)
 	}
 
 	_ = RemoveState(m.StateFile)
@@ -136,7 +219,6 @@ func (m Manager) Status(cfg config.Config) (Status, error) {
 	hasState := stateErr == nil
 
 	pid, source := m.resolvePID(cfg, st, stateErr, healthy)
-
 	running := healthy
 
 	st2 := Status{
@@ -152,6 +234,30 @@ func (m Manager) Status(cfg config.Config) (Status, error) {
 		st2.Source = SourceNone
 	}
 	return st2, nil
+}
+
+func cleanStalePID(cfg config.Config) {
+	pid, err := readPIDFn()
+	if err != nil || pid <= 0 {
+		return
+	}
+	ps := statusForPIDFn(pid)
+	if ps == process.StatusStale {
+		os.Remove(config.PIDFile())
+		RemoveState(DaemonStateFile())
+	}
+}
+
+func waitPIDExit(pid int) {
+	if pid <= 0 {
+		return
+	}
+	for i := 0; i < 50; i++ {
+		if process.StatusForPID(pid) == process.StatusStale {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func (m Manager) resolvePID(cfg config.Config, st State, stateErr error, healthy bool) (int, string) {

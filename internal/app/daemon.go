@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -49,7 +50,8 @@ func daemonStartCmd() *cobra.Command {
 }
 
 func daemonStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show OCGO daemon status",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -58,6 +60,14 @@ func daemonStatusCmd() *cobra.Command {
 				return err
 			}
 			mgr := daemon.NewManager()
+
+			if jsonOut {
+				ds := mgr.DetailedStatus(cfg)
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(ds)
+			}
+
 			s, err := mgr.Status(cfg)
 			if err != nil {
 				return err
@@ -68,24 +78,21 @@ func daemonStatusCmd() *cobra.Command {
 				fmt.Fprintf(out, "Base URL: %s\n", s.BaseURL)
 				return nil
 			}
-			if !s.HasState {
-				fmt.Fprintln(out, "OCGO proxy is running, but daemon state is missing")
-				fmt.Fprintf(out, "Base URL: %s\n", s.BaseURL)
-				if s.PID > 0 {
-					fmt.Fprintf(out, "PID: %d\n", s.PID)
-				}
-				return nil
-			}
-			fmt.Fprintln(out, "OCGO daemon is running")
-			fmt.Fprintf(out, "Base URL: %s\n", s.BaseURL)
-			if s.PID > 0 {
-				fmt.Fprintf(out, "PID: %d\n", s.PID)
-			}
-			fmt.Fprintf(out, "State: %s\n", mgr.StateFile)
-			fmt.Fprintf(out, "Log: %s\n", config.LogFile())
+			ds := mgr.DetailedStatus(cfg)
+			fmt.Fprintln(out, "OCGO daemon status:")
+			fmt.Fprintf(out, "  state file:     %s\n", ds.StateFileStatus)
+			fmt.Fprintf(out, "  pid file:       %s\n", ds.PIDFileStatus)
+			fmt.Fprintf(out, "  pid:            %d\n", ds.PID)
+			fmt.Fprintf(out, "  process:        %s\n", ds.Process)
+			fmt.Fprintf(out, "  health:         %s\n", ds.Health)
+			fmt.Fprintf(out, "  base url:       %s\n", ds.BaseURL)
+			fmt.Fprintf(out, "  log file:       %s\n", ds.LogFile)
+			fmt.Fprintf(out, "  started at:     %s\n", ds.StartedAt)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Print daemon status as JSON")
+	return cmd
 }
 
 func daemonStopCmd() *cobra.Command {
