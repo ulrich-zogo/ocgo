@@ -54,6 +54,19 @@ used:
 go test ./internal/e2e -run E2E -short -v
 ```
 
+## Real daemon process smoke test
+
+The app-level E2E tests above use daemon runtime stubs. To test a real
+background daemon process with local HTTP endpoints:
+
+```bash
+OCGO_E2E_REAL_DAEMON=1 go test ./internal/e2e -run RealDaemon -v
+```
+
+This test builds the OCGO binary from source and starts the actual daemon.
+It is opt-in to avoid port conflicts and process management in the default
+suite. See [real-daemon-smoke.md](real-daemon-smoke.md).
+
 ## Safety
 
 All tests run with temporary `HOME`/`USERPROFILE` directories created via

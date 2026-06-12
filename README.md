@@ -453,6 +453,17 @@ go test ./internal/e2e -run E2E -v
 
 See [docs/e2e-smoke.md](docs/e2e-smoke.md) for details.
 
+### Optional real daemon smoke test
+
+The default test suite uses app-level daemon stubs. To test a real background
+daemon process:
+
+```bash
+OCGO_E2E_REAL_DAEMON=1 go test ./internal/e2e -run RealDaemon -v
+```
+
+See [docs/real-daemon-smoke.md](docs/real-daemon-smoke.md).
+
 ## Remote Codex
 
 ocgo's proxy listens on `127.0.0.1:3456` by default. When Codex CLI runs on the same machine, this works as-is.

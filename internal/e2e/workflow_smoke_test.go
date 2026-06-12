@@ -17,27 +17,6 @@ import (
 	"ocgo/internal/process"
 )
 
-var expectedOfficialModels = []string{
-	"minimax-m3",
-	"minimax-m2.7",
-	"minimax-m2.5",
-	"kimi-k2.6",
-	"kimi-k2.5",
-	"glm-5.1",
-	"glm-5",
-	"deepseek-v4-pro",
-	"deepseek-v4-flash",
-	"qwen3.7-max",
-	"qwen3.7-plus",
-	"qwen3.6-plus",
-	"qwen3.5-plus",
-	"mimo-v2-pro",
-	"mimo-v2-omni",
-	"mimo-v2.5-pro",
-	"mimo-v2.5",
-	"hy3-preview",
-}
-
 func TestE2EFreshConfigDiagnosticsWorkflow(t *testing.T) {
 	dir := newTempHome(t)
 
