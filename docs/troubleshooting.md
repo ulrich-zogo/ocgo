@@ -154,6 +154,17 @@ Exit codes:
 - `0` — all checks passed or only warnings exist
 - `1` — at least one check failed with an error
 
+## E2E smoke tests
+
+Before reporting a workflow regression, run the app-level smoke tests:
+
+```bash
+go test ./internal/e2e -run E2E -v
+```
+
+These tests validate the full CLI workflow pipeline without requiring real
+API keys, upstream access, or Codex/Claude installations.
+
 ## Reset OCGO safely
 
 ```bash

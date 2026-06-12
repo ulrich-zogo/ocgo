@@ -441,6 +441,18 @@ Exit codes:
 - `ocgo doctor --json` may return `1` when at least one check is in error
   (JSON output is still valid)
 
+## E2E smoke tests
+
+Workflow smoke tests validate real user scenarios from fresh config through
+diagnostics, model selection, daemon lifecycle, Codex CLI/Desktop integration,
+and config backup/reset:
+
+```bash
+go test ./internal/e2e -run E2E -v
+```
+
+See [docs/e2e-smoke.md](docs/e2e-smoke.md) for details.
+
 ## Remote Codex
 
 ocgo's proxy listens on `127.0.0.1:3456` by default. When Codex CLI runs on the same machine, this works as-is.
