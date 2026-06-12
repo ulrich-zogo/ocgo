@@ -109,6 +109,7 @@ ocgo version
 ocgo version --json
 ocgo models
 ocgo doctor
+ocgo support bundle --output "$env:TEMP\ocgo-support.zip" --force
 ```
 
 ## Setup

@@ -399,6 +399,23 @@ The doctor never modifies files, never starts the daemon, and never switches the
 
 Exit codes: `0` = ok or warning; `1` = at least one error.
 
+## Support bundle
+
+Generate a redacted diagnostic bundle for bug reports:
+
+```bash
+ocgo support bundle
+```
+
+Write to a specific path:
+
+```bash
+ocgo support bundle --output ./ocgo-support.zip
+```
+
+The bundle is always redacted and can be safely attached to issues. See
+[docs/support-bundle.md](docs/support-bundle.md) for details.
+
 ## Remote Codex
 
 ocgo's proxy listens on `127.0.0.1:3456` by default. When Codex CLI runs on the same machine, this works as-is.
