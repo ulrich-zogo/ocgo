@@ -119,6 +119,51 @@ func TestSupportBundleCommandNoLogs(t *testing.T) {
 	}
 }
 
+func TestSupportBundleJSONIsStrict(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", dir)
+	t.Setenv("OCGO_API_KEY", "test")
+
+	ocgoDir := filepath.Join(dir, ".config", "ocgo")
+	os.MkdirAll(ocgoDir, 0755)
+	os.WriteFile(filepath.Join(ocgoDir, "config.json"), []byte(`{"api_key":"test","host":"127.0.0.1","port":3456}`), 0644)
+
+	outPath := filepath.Join(dir, "out.zip")
+	buf := new(bytes.Buffer)
+	root := NewRootCommand("test")
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs([]string{"support", "bundle", "--output", outPath, "--force", "--json"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("support bundle: %v", err)
+	}
+	output := buf.String()
+	if !json.Valid([]byte(output)) {
+		t.Fatalf("support bundle --json is not valid JSON:\n%s", output)
+	}
+	var result struct {
+		Path         string   `json:"path"`
+		Files        []string `json:"files"`
+		Redacted     bool     `json:"redacted"`
+		LogsIncluded bool     `json:"logs_included"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("unmarshal: %v\noutput: %s", err, output)
+	}
+	if result.Path == "" {
+		t.Fatal("path should not be empty")
+	}
+	if len(result.Files) == 0 {
+		t.Fatal("files should not be empty")
+	}
+	if !result.Redacted {
+		t.Fatal("expected redacted=true")
+	}
+}
+
 func TestSupportBundleCommandRefusesOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)

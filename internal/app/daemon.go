@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -63,9 +62,7 @@ func daemonStatusCmd() *cobra.Command {
 
 			if jsonOut {
 				ds := mgr.DetailedStatus(cfg)
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(ds)
+				return writeJSON(cmd.OutOrStdout(), ds)
 			}
 
 			s, err := mgr.Status(cfg)

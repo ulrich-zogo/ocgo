@@ -55,6 +55,19 @@ export OCGO_API_KEY=sk-opencode-your-key
 
 When both the file and the env var are set, the env var takes precedence.
 
+## Inspecting configuration as JSON
+
+These commands are read-only and safe for scripts:
+
+```bash
+ocgo config paths --json
+ocgo config inspect --json
+```
+
+`config paths --json` prints all managed file paths. `config inspect --json`
+prints configuration state with API key status (present/missing) but never
+the key value itself.
+
 ## Configuration lifecycle
 
 See [config-lifecycle.md](config-lifecycle.md) for safe backup, restore, and reset commands:

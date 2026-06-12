@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -107,14 +106,7 @@ func runDoctor(cmd *cobra.Command, args []string, modeFlag string, wantJSON bool
 
 // writeDoctorJSON serializes the report as compact JSON.
 func writeDoctorJSON(w io.Writer, rep doctor.Report) error {
-	b, err := json.MarshalIndent(rep, "", "  ")
-	if err != nil {
-		return err
-	}
-	if _, err := w.Write(append(b, '\n')); err != nil {
-		return err
-	}
-	return nil
+	return writeJSON(w, rep)
 }
 
 // writeDoctorText writes a human-readable, no-color report.

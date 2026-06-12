@@ -416,6 +416,31 @@ ocgo support bundle --output ./ocgo-support.zip
 The bundle is always redacted and can be safely attached to issues. See
 [docs/support-bundle.md](docs/support-bundle.md) for details.
 
+## Script-friendly JSON diagnostics
+
+The following commands produce strict JSON on stdout when `--json` is given,
+suitable for use in scripts, CI, and support tools:
+
+```bash
+ocgo version --json
+ocgo doctor --json
+ocgo daemon status --json
+ocgo config paths --json
+ocgo config inspect --json
+ocgo support bundle --json
+```
+
+In JSON mode, successful commands write only JSON to stdout. Human-readable
+output is reserved for text mode.
+
+Diagnostic JSON output never includes API keys or bearer tokens.
+
+Exit codes:
+- `0` on success
+- Non-zero on command failure
+- `ocgo doctor --json` may return `1` when at least one check is in error
+  (JSON output is still valid)
+
 ## Remote Codex
 
 ocgo's proxy listens on `127.0.0.1:3456` by default. When Codex CLI runs on the same machine, this works as-is.

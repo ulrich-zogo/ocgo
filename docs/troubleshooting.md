@@ -116,6 +116,21 @@ The bundle is saved to `~/.config/ocgo/support-bundles/` and can be safely
 attached to bug reports. See [docs/support-bundle.md](support-bundle.md) for
 details.
 
+## Script-friendly diagnostics
+
+For CI or support scripts, these commands produce strict JSON on stdout:
+
+```bash
+ocgo doctor --json
+ocgo daemon status --json
+ocgo config inspect --json
+ocgo support bundle --json
+```
+
+JSON output never contains API keys or bearer tokens. If `doctor --json`
+reports failing checks, it may return a non-zero exit code while still
+printing valid JSON.
+
 ## Doctor diagnostics overview
 
 ```bash

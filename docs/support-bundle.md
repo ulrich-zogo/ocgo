@@ -83,7 +83,8 @@ ocgo support bundle --output ./my-bundle.zip --force
 ocgo support bundle --json
 ```
 
-Returns a single JSON object with no surrounding text.
+Returns a single JSON object with no surrounding text. The command exits with
+non-zero if the bundle cannot be created (e.g. output file exists without `--force`).
 
 ## Troubleshooting
 

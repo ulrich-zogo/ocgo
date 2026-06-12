@@ -155,6 +155,17 @@ OCGO configuration is stored under:
 %USERPROFILE%\.codex
 ```
 
+## JSON diagnostics in PowerShell
+
+JSON output can be piped to `ConvertFrom-Json` for scripting:
+
+```powershell
+ocgo version --json | ConvertFrom-Json
+ocgo daemon status --json | ConvertFrom-Json
+ocgo config inspect --json | ConvertFrom-Json
+ocgo support bundle --json | ConvertFrom-Json
+```
+
 ## Troubleshooting
 
 If `ocgo` is not found after installation:

@@ -2,6 +2,8 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -63,6 +65,91 @@ func TestDaemonStatusNotRunning(t *testing.T) {
 	}
 	if !strings.Contains(got, "Base URL: http://127.0.0.1:3456") {
 		t.Fatalf("output missing base URL:\n%s", got)
+	}
+}
+
+func TestDaemonStatusJSONIsStrict(t *testing.T) {
+	setupDaemonTestHome(t)
+	stub := &daemonStub{}
+	stub.install(t)
+
+	root := NewRootCommand("test")
+	root.SetArgs([]string{"daemon", "status", "--json"})
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	output := out.String()
+	if !json.Valid([]byte(output)) {
+		t.Fatalf("daemon status --json is not valid JSON:\n%s", output)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(output), &parsed); err != nil {
+		t.Fatalf("unmarshal: %v\noutput: %s", err, output)
+	}
+	for _, key := range []string{"state_file", "pid_file", "pid", "process", "health", "base_url", "log_file", "started_at"} {
+		if _, ok := parsed[key]; !ok {
+			t.Errorf("missing key %q in JSON output", key)
+		}
+	}
+}
+
+func TestDaemonStatusJSONDaemonMissingExitZero(t *testing.T) {
+	setupDaemonTestHome(t)
+	stub := &daemonStub{}
+	stub.install(t)
+
+	root := NewRootCommand("test")
+	root.SetArgs([]string{"daemon", "status", "--json"})
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("should exit 0 when daemon absent, got: %v, output: %s", err, out.String())
+	}
+}
+
+func TestDaemonStatusJSONNoSideEffects(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", dir)
+	cfgPath := filepath.Join(dir, ".config", "ocgo", "config.json")
+	if err := writeFile(cfgPath, `{"api_key":"test-key","host":"127.0.0.1","port":3456}`); err != nil {
+		t.Fatal(err)
+	}
+
+	var before []string
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			rel, _ := filepath.Rel(dir, path)
+			before = append(before, rel)
+		}
+		return nil
+	})
+
+	root := NewRootCommand("test")
+	root.SetArgs([]string{"daemon", "status", "--json"})
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var after []string
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			rel, _ := filepath.Rel(dir, path)
+			after = append(after, rel)
+		}
+		return nil
+	})
+	if len(before) != len(after) {
+		t.Fatalf("daemon status --json created files: before=%v after=%v", before, after)
 	}
 }
 

@@ -247,6 +247,42 @@ func TestDoctorJSONShapeExcludesDecorations(t *testing.T) {
 	}
 }
 
+func TestDoctorJSONNoSecretLeak(t *testing.T) {
+	dir := redirectAppHome(t)
+	ocgoDir := filepath.Join(dir, ".config", "ocgo")
+	os.MkdirAll(ocgoDir, 0755)
+	os.WriteFile(filepath.Join(ocgoDir, "config.json"), []byte(`{"api_key":"SUPER_SECRET_TEST_KEY","host":"127.0.0.1","port":3456}`), 0644)
+
+	out, _ := executeRoot(t, "doctor", "codex", "--json")
+	if strings.Contains(out, "SUPER_SECRET_TEST_KEY") {
+		t.Fatal("doctor --json leaked secret API key")
+	}
+	var rep doctor.Report
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("doctor --json invalid after adding secret: %v\noutput: %s", err, out)
+	}
+}
+
+func TestDoctorJSONIsStrictWhenChecksFail(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", dir)
+
+	out, err := executeRoot(t, "doctor", "codex", "--mode", "all", "--json")
+	if err == nil {
+		t.Log("doctor --json returned 0 (checks passed)")
+	}
+	var rep doctor.Report
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("doctor --json invalid JSON even with failing checks: %v\noutput: %s", err, out)
+	}
+	if rep.Status != "" {
+		_ = rep.Status
+	}
+}
+
 func TestDoctorTextOutputMentionsOverall(t *testing.T) {
 	redirectAppHome(t)
 	out, _ := executeRoot(t, "doctor", "codex")
