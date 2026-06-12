@@ -296,6 +296,17 @@ func readZipEntryRaw(zipPath, name string) ([]byte, error) {
 	return nil, zip.ErrFormat
 }
 
+func TestCreateSafeZipEntryRejectsUnsafe(t *testing.T) {
+	_, _, err := createSafeZipEntry(nil, "../evil")
+	if err == nil {
+		t.Fatal("expected error for traversal path")
+	}
+	_, _, err = createSafeZipEntry(nil, "C:\\evil")
+	if err == nil {
+		t.Fatal("expected error for Windows drive path")
+	}
+}
+
 func readManifest(t *testing.T, zipPath string) BundleManifest {
 	t.Helper()
 	data := readZipEntry(t, zipPath, "manifest.json")

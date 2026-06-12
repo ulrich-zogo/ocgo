@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -79,7 +80,7 @@ func CreateBundle(opts BundleOptions) (BundleResult, error) {
 		if redacted {
 			data = RedactJSONBytes(data)
 		}
-		h, err := zw.Create(filepath.ToSlash(name))
+		h, safe, err := createSafeZipEntry(zw, name)
 		if err != nil {
 			files = append(files, BundleManifestFile{Path: name, Status: "error", Source: source, Error: err.Error()})
 			return
@@ -88,7 +89,7 @@ func CreateBundle(opts BundleOptions) (BundleResult, error) {
 			files = append(files, BundleManifestFile{Path: name, Status: "error", Source: source, Error: err.Error()})
 			return
 		}
-		files = append(files, BundleManifestFile{Path: name, Status: "included", Source: source})
+		files = append(files, BundleManifestFile{Path: safe, Status: "included", Source: source})
 	}
 
 	addJSON := func(name string, v any) {
@@ -117,7 +118,7 @@ func CreateBundle(opts BundleOptions) (BundleResult, error) {
 		if redacted {
 			b = RedactJSONBytes(b)
 		}
-		h, err := zw.Create(filepath.ToSlash(relPath))
+		h, safe, err := createSafeZipEntry(zw, relPath)
 		if err != nil {
 			files = append(files, BundleManifestFile{Path: relPath, Status: "error", Source: absPath, Error: err.Error()})
 			return
@@ -126,7 +127,7 @@ func CreateBundle(opts BundleOptions) (BundleResult, error) {
 			files = append(files, BundleManifestFile{Path: relPath, Status: "error", Source: absPath, Error: err.Error()})
 			return
 		}
-		files = append(files, BundleManifestFile{Path: relPath, Status: "included", Source: absPath})
+		files = append(files, BundleManifestFile{Path: safe, Status: "included", Source: absPath})
 	}
 
 	addVersion := func() {
@@ -194,7 +195,7 @@ func CreateBundle(opts BundleOptions) (BundleResult, error) {
 		if redacted {
 			content = redactText(content)
 		}
-		h, err := zw.Create("logs/ocgo.log")
+		h, safe, err := createSafeZipEntry(zw, "logs/ocgo.log")
 		if err != nil {
 			files = append(files, BundleManifestFile{Path: "logs/ocgo.log", Status: "error", Source: logPath, Error: err.Error()})
 			return
@@ -203,7 +204,7 @@ func CreateBundle(opts BundleOptions) (BundleResult, error) {
 			files = append(files, BundleManifestFile{Path: "logs/ocgo.log", Status: "error", Source: logPath, Error: err.Error()})
 			return
 		}
-		mf := BundleManifestFile{Path: "logs/ocgo.log", Status: "included", Source: logPath}
+		mf := BundleManifestFile{Path: safe, Status: "included", Source: logPath}
 		if truncated {
 			mf.Truncated = true
 			mf.MaxBytes = maxLogBytes
@@ -243,7 +244,7 @@ func CreateBundle(opts BundleOptions) (BundleResult, error) {
 		Files:        files,
 	}
 	mb, _ := json.MarshalIndent(manifest, "", "  ")
-	mfh, err := zw.Create("manifest.json")
+	mfh, _, err := createSafeZipEntry(zw, "manifest.json")
 	if err != nil {
 		return BundleResult{}, fmt.Errorf("cannot create manifest.json in zip: %w", err)
 	}
@@ -271,6 +272,18 @@ func CreateBundle(opts BundleOptions) (BundleResult, error) {
 		Redacted:     redacted,
 		LogsIncluded: includeLogs,
 	}, nil
+}
+
+func createSafeZipEntry(zw *zip.Writer, name string) (io.Writer, string, error) {
+	safeName, err := SafeZipPath(name)
+	if err != nil {
+		return nil, "", fmt.Errorf("unsafe zip path %q: %w", name, err)
+	}
+	w, err := zw.Create(safeName)
+	if err != nil {
+		return nil, "", fmt.Errorf("create zip entry %q: %w", safeName, err)
+	}
+	return w, safeName, nil
 }
 
 func detectShell() string {

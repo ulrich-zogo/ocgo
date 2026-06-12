@@ -124,6 +124,30 @@ func TestRedactTextRefreshToken(t *testing.T) {
 	}
 }
 
+func TestRedactJSONBearerTokenInNonSensitiveString(t *testing.T) {
+	in := []byte(`{"message":"Authorization failed: Bearer sk-secret-token"}`)
+	out := RedactJSONBytes(in)
+	if contains(string(out), "sk-secret-token") {
+		t.Fatal("bearer token leaked in non-sensitive JSON string")
+	}
+}
+
+func TestRedactJSONEnvTokenInErrorString(t *testing.T) {
+	in := []byte(`{"error":"OPENAI_API_KEY=sk-secret-token"}`)
+	out := RedactJSONBytes(in)
+	if contains(string(out), "sk-secret-token") {
+		t.Fatal("env token leaked in JSON error string")
+	}
+}
+
+func TestRedactJSONAPIKeyInNestedString(t *testing.T) {
+	in := []byte(`{"details":{"message":"api_key = sk-some-key-here for user"}}`)
+	out := RedactJSONBytes(in)
+	if contains(string(out), "sk-some-key-here") {
+		t.Fatal("api_key leaked in nested JSON string")
+	}
+}
+
 func TestRedactTextSecretInLogLine(t *testing.T) {
 	in := `2026-06-12 INFO request authorized: Bearer sk-my-key for user test`
 	out := RedactText(in)

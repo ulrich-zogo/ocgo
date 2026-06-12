@@ -51,7 +51,7 @@ func RedactJSONBytes(input []byte) []byte {
 	if err := json.Unmarshal(input, &raw); err != nil {
 		return []byte(redactText(string(input)))
 	}
-	redactValue(raw)
+	raw = redactValue(raw)
 	b, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return []byte(redactText(string(input)))
@@ -59,20 +59,26 @@ func RedactJSONBytes(input []byte) []byte {
 	return b
 }
 
-func redactValue(v any) {
-	switch m := v.(type) {
+func redactValue(v any) any {
+	switch x := v.(type) {
 	case map[string]any:
-		for k, val := range m {
+		for k, val := range x {
 			if redactFields[strings.ToLower(k)] {
-				m[k] = "[REDACTED]"
+				x[k] = "[REDACTED]"
 			} else {
-				redactValue(val)
+				x[k] = redactValue(val)
 			}
 		}
+		return x
 	case []any:
-		for _, item := range m {
-			redactValue(item)
+		for i, item := range x {
+			x[i] = redactValue(item)
 		}
+		return x
+	case string:
+		return redactText(x)
+	default:
+		return x
 	}
 }
 
