@@ -183,11 +183,13 @@ func (m Manager) Stop(cfg config.Config) error {
 	}
 
 	if !healthyFn(base) && pid > 0 {
-		ps := process.StatusForPID(pid)
-		if ps != process.StatusPresent {
+		switch process.StatusForPID(pid) {
+		case process.StatusStale:
 			_ = RemoveState(m.StateFile)
 			_ = osRemoveFile(config.PIDFile())
 			return ErrNotRunning
+		case process.StatusUnknown:
+			return fmt.Errorf("cannot safely determine daemon process status for pid %d", pid)
 		}
 	}
 
@@ -240,7 +242,7 @@ func cleanStalePID(cfg config.Config) {
 		return
 	}
 	ps := process.StatusForPID(pid)
-	if ps == process.StatusStale || ps == process.StatusUnknown {
+	if ps == process.StatusStale {
 		os.Remove(config.PIDFile())
 		RemoveState(DaemonStateFile())
 	}

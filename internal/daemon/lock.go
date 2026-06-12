@@ -27,22 +27,43 @@ func AcquireLock() (func(), error) {
 		return nil, fmt.Errorf("create lock dir: %w", err)
 	}
 
-	existing, err := readLock(path)
-	if err == nil {
-		if existing.PID > 0 {
-			ps := process.StatusForPID(existing.PID)
-			if ps == process.StatusPresent || ps == process.StatusUnknown {
-				return nil, errors.New("another OCGO daemon operation is already running")
-			}
-		}
-	}
-
 	lock := Lock{
 		PID:       os.Getpid(),
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := writeLock(path, lock); err != nil {
+
+	b, err := json.MarshalIndent(lock, "", "  ")
+	if err != nil {
 		return nil, err
+	}
+	data := append(b, '\n')
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		if os.IsExist(err) {
+			existing, readErr := readLock(path)
+			if readErr == nil && existing.PID > 0 {
+				ps := process.StatusForPID(existing.PID)
+				if ps == process.StatusPresent || ps == process.StatusUnknown {
+					return nil, errors.New("another OCGO daemon operation is already running")
+				}
+			}
+			if err := os.Remove(path); err != nil {
+				return nil, fmt.Errorf("failed to remove stale lock: %w", err)
+			}
+			f, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+			if err != nil {
+				return nil, fmt.Errorf("failed to acquire lock after stale cleanup: %w", err)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to acquire lock: %w", err)
+		}
+	}
+	defer f.Close()
+
+	if _, err := f.Write(data); err != nil {
+		os.Remove(path)
+		return nil, fmt.Errorf("failed to write lock: %w", err)
 	}
 
 	released := false
