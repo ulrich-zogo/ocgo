@@ -104,6 +104,18 @@ For LAN access, edit `~/.config/ocgo/config.json`:
 
 Then in the remote Codex profile, set `openai_base_url = "http://<HOST_IP>:3456/v1/"`.
 
+## Support bundle
+
+If you need to report an issue, generate a redacted support bundle:
+
+```bash
+ocgo support bundle
+```
+
+The bundle is saved to `~/.config/ocgo/support-bundles/` and can be safely
+attached to bug reports. See [docs/support-bundle.md](support-bundle.md) for
+details.
+
 ## Doctor diagnostics overview
 
 ```bash

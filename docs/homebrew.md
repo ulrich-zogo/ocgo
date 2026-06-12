@@ -81,4 +81,5 @@ brew install ocgo
 ocgo --help
 ocgo version
 ocgo version --json
+ocgo support bundle
 ```
