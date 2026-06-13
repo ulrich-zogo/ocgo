@@ -29,12 +29,15 @@ These settings apply to administrators as well (`enforce_admins: true`).
 
 ## Required checks
 
-Recommended:
+Recommended (use the exact check run name, which is the job name):
 
 ```text
 test
-windows-install-smoke
+install
 ```
+
+The `test` check run comes from the `test` workflow (job: `test`).
+The `install` check run comes from the `windows-install-smoke` workflow (job: `install`).
 
 Do not require:
 

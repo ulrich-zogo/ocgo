@@ -60,10 +60,10 @@ Recommended settings:
 
 Required checks should include only workflows that run automatically on PRs.
 
-Recommended required checks:
+Recommended required checks (use the exact check run name, which is the job name):
 
-- `test`
-- `windows-install-smoke`
+- `test` — from the `test` workflow
+- `install` — from the `windows-install-smoke` workflow
 
 Do not require opt-in/manual tests such as the real daemon smoke test.
 

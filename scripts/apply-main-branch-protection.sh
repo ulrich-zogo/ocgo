@@ -17,7 +17,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#REQUIRED_CHECKS[@]} -eq 0 ]]; then
-  REQUIRED_CHECKS=("test" "windows-install-smoke")
+  # Use the exact check run names (job names from workflow YAML).
+  REQUIRED_CHECKS=("test" "install")
 fi
 
 if [[ -z "$REPO" ]]; then
