@@ -132,6 +132,18 @@ if [[ $PROTECTION_EXIT -eq 0 ]] && [[ -n "$PROTECTION_DATA" ]]; then
   ALLOW_FORCE_PUSHES=$(extract_json "$PROTECTION_DATA" '.allow_force_pushes.enabled // false')
   ALLOW_DELETIONS=$(extract_json "$PROTECTION_DATA" '.allow_deletions.enabled // false')
   HAS_LINEAR_HISTORY=$(extract_json "$PROTECTION_DATA" '.required_linear_history.enabled // false')
+  REQUIRED_CHECKS=$(extract_json "$PROTECTION_DATA" '
+    if (.required_status_checks.contexts // [] | length) > 0 then
+      (.required_status_checks.contexts | join(","))
+    elif (.required_status_checks.checks // [] | length) > 0 then
+      (.required_status_checks.checks | map(.context) | join(","))
+    else
+      "none"
+    end
+  ')
+  if [[ -z "$REQUIRED_CHECKS" ]]; then
+    REQUIRED_CHECKS="none"
+  fi
 fi
 
 if $OUTPUT_JSON; then

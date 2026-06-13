@@ -46,11 +46,11 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 
-# Check admin permission.
-PERMISSION=$(gh api "repos/${REPO}" --jq '.viewerPermission // "read"' 2>/dev/null || echo "unknown")
-if [[ "$PERMISSION" != "ADMIN" ]]; then
+# Check admin permission via REST API.
+IS_ADMIN=$(gh api "repos/${REPO}" --jq '.permissions.admin // false' 2>/dev/null || echo "false")
+if [[ "$IS_ADMIN" != "true" ]]; then
   echo "ERROR: admin permission required on ${REPO}" >&2
-  echo "  Current permission: ${PERMISSION}" >&2
+  echo "  permissions.admin: ${IS_ADMIN}" >&2
   exit 1
 fi
 
@@ -142,8 +142,10 @@ fi
 
 echo ""
 echo "Applying branch protection ..."
+set +e
 PROTECTION_RESPONSE=$(gh api "repos/${REPO}/branches/${BRANCH}/protection" -X PUT -H "Accept: application/vnd.github+json" --input - <<<"$PROTECTION_PAYLOAD" 2>&1)
 PROTECTION_EXIT=$?
+set -e
 if [[ $PROTECTION_EXIT -eq 0 ]]; then
   echo "  Branch protection applied."
 else
@@ -154,8 +156,10 @@ fi
 
 echo ""
 echo "Applying repository settings ..."
+set +e
 SETTINGS_RESPONSE=$(gh api "repos/${REPO}" -X PATCH -H "Accept: application/vnd.github+json" --input - <<<"$REPO_SETTINGS_PAYLOAD" 2>&1)
 SETTINGS_EXIT=$?
+set -e
 if [[ $SETTINGS_EXIT -eq 0 ]]; then
   echo "  Repository settings applied."
 else
