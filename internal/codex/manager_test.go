@@ -206,6 +206,12 @@ base_url = "https://api.openai.com/v1"
 }
 
 func TestManagerWriteModelCatalogUsesManagerPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", home)
+
 	old := config.ModelMappingFile
 	config.ModelMappingFile = func() string { return filepath.Join(t.TempDir(), "model-mapping.json") }
 	t.Cleanup(func() { config.ModelMappingFile = old })
@@ -222,7 +228,105 @@ func TestManagerWriteModelCatalogUsesManagerPath(t *testing.T) {
 	}
 
 	if _, err := os.Stat(config.CodexModelCatalogFile()); err == nil {
-		t.Fatal("manager should not write to the production config path when given a custom path")
+		t.Fatal("manager should not write to default CodexModelCatalogFile when given a custom path")
+	}
+}
+
+func TestManagerWriteModelCatalogDoesNotWriteDefaultPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", home)
+
+	old := config.ModelMappingFile
+	config.ModelMappingFile = func() string { return filepath.Join(t.TempDir(), "model-mapping.json") }
+	t.Cleanup(func() { config.ModelMappingFile = old })
+	restoreCache := models.SetCacheFileForTest(filepath.Join(t.TempDir(), "model-catalog-cache.json"))
+	t.Cleanup(restoreCache)
+
+	paths := tempCodexPaths(t)
+	mgr := Manager{Paths: paths}
+	if err := mgr.WriteModelCatalog(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(paths.ModelCatalogFile); err != nil {
+		t.Fatalf("manager should write to its ModelCatalogFile: %v", err)
+	}
+
+	defaultPath := filepath.Join(home, ".codex", "ocgo-models.json")
+	if _, err := os.Stat(defaultPath); err == nil {
+		t.Fatal("manager should not write to default path under HOME when given a custom path")
+	}
+}
+
+func TestManagerWriteModelCatalogCreatesParentDirectories(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", home)
+
+	old := config.ModelMappingFile
+	config.ModelMappingFile = func() string { return filepath.Join(t.TempDir(), "model-mapping.json") }
+	t.Cleanup(func() { config.ModelMappingFile = old })
+	restoreCache := models.SetCacheFileForTest(filepath.Join(t.TempDir(), "model-catalog-cache.json"))
+	t.Cleanup(restoreCache)
+
+	customDir := filepath.Join(home, "custom", "deep", "codex")
+	catalogPath := filepath.Join(customDir, "models.json")
+	mgr := Manager{Paths: Paths{ModelCatalogFile: catalogPath}}
+	if err := mgr.WriteModelCatalog(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(catalogPath); err != nil {
+		t.Fatalf("model catalog should exist at %s: %v", catalogPath, err)
+	}
+}
+
+func TestManagerWriteModelCatalogWritesValidJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", home)
+
+	old := config.ModelMappingFile
+	config.ModelMappingFile = func() string { return filepath.Join(t.TempDir(), "model-mapping.json") }
+	t.Cleanup(func() { config.ModelMappingFile = old })
+	restoreCache := models.SetCacheFileForTest(filepath.Join(t.TempDir(), "model-catalog-cache.json"))
+	t.Cleanup(restoreCache)
+
+	catalogPath := filepath.Join(home, ".codex", "ocgo-models.json")
+	mgr := Manager{Paths: Paths{ModelCatalogFile: catalogPath}}
+	if err := mgr.WriteModelCatalog(); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(catalogPath)
+	if err != nil {
+		t.Fatalf("should read catalog: %v", err)
+	}
+	var payload struct {
+		Models []any `json:"models"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("model catalog should be valid JSON: %v", err)
+	}
+	if len(payload.Models) == 0 {
+		t.Fatal("model catalog should contain models")
+	}
+}
+
+func TestManagerWriteModelCatalogEmptyPathReturnsError(t *testing.T) {
+	mgr := Manager{Paths: Paths{ModelCatalogFile: ""}}
+	if err := mgr.WriteModelCatalog(); err == nil {
+		t.Fatal("expected error when ModelCatalogFile is empty")
+	}
+	mgr2 := Manager{Paths: Paths{ModelCatalogFile: "  "}}
+	if err := mgr2.WriteModelCatalog(); err == nil {
+		t.Fatal("expected error when ModelCatalogFile is whitespace only")
 	}
 }
 
