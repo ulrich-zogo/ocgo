@@ -60,7 +60,7 @@ go 1.22
     $versionLine = if ($ExitCodeVersion -eq 0) {
         'fmt.Println("ocgo mock version v0.0.0-test")'
     } else {
-        'fmt.Println("mock version unavailable")'
+        'fmt.Fprintln(os.Stderr, "Error: unknown command \"version\" for \"ocgo\"")'
     }
 
     @"
@@ -165,6 +165,7 @@ try {
             $result = Invoke-Installer -Arguments @("-ArchivePath", $zip, "-InstallDir", $installDir, "-NoPath", "-Force")
             if ($result.ExitCode -ne 0) { throw "Expected exit 0, got $($result.ExitCode)" }
             if (-not (Output-Matches $result.Output "did not report a version")) { throw "Warning about missing version not found" }
+            if (-not (Output-Matches $result.Output "Error: unknown command")) { throw "stderr error message not found in output" }
             if (-not (Output-Matches $result.Output "OCGO installed successfully")) { throw "Success message not found" }
             if (-not (Test-Path (Join-Path $installDir "ocgo.exe"))) { throw "ocgo.exe not installed" }
         }
