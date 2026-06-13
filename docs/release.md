@@ -112,6 +112,22 @@ This validates:
 - Homebrew formula;
 - Homebrew installation on macOS.
 
+## Repository governance checks
+
+Before publishing a release:
+
+```bash
+make check-repo-ownership
+```
+
+Optionally audit GitHub repository settings:
+
+```bash
+make audit-repo-governance
+```
+
+The governance audit requires GitHub CLI authentication and admin access.
+
 ## Rollback
 
 See [release rollback](release-rollback.md).

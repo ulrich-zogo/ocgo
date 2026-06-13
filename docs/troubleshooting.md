@@ -182,6 +182,38 @@ go test ./internal/e2e -run E2E -v
 These tests validate the full CLI workflow pipeline without requiring real
 API keys, upstream access, or Codex/Claude installations.
 
+## Repository still appears as a fork
+
+GitHub repository files cannot remove fork-network metadata.
+
+Use the support request template:
+
+```text
+docs/github-support-unfork-request.md
+```
+
+After GitHub Support confirms the detach, run:
+
+```bash
+scripts/audit-repo-governance.sh
+```
+
+## main is not protected
+
+Check current protection status:
+
+```bash
+scripts/audit-repo-governance.sh
+```
+
+To apply the recommended protection:
+
+```bash
+scripts/apply-main-branch-protection.sh
+```
+
+See [docs/branch-protection.md](branch-protection.md) for details.
+
 ## Reset OCGO safely
 
 ```bash
