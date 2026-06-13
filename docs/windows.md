@@ -15,6 +15,8 @@ Install the latest OCGO release:
 irm https://raw.githubusercontent.com/ulrich-zogo/ocgo/main/scripts/install-windows.ps1 | iex
 ```
 
+The installer uses `ocgo.exe --help` as the mandatory binary verification. If `ocgo.exe version` fails (e.g., on an older release that predates the version command), the installer prints a warning and continues.
+
 Or run explicitly:
 
 ```powershell

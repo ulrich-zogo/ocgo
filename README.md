@@ -157,6 +157,8 @@ PowerShell installer:
 irm https://raw.githubusercontent.com/ulrich-zogo/ocgo/main/scripts/install-windows.ps1 | iex
 ```
 
+The installer verifies the binary with `--help`. If the installed release does not support `ocgo version`, the installer prints a warning but still completes successfully.
+
 Scoop, after bucket publication:
 
 ```powershell
