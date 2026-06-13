@@ -193,8 +193,17 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "Installed version:"
-$versionOutput = & $installedExe version 2>&1
-if ($LASTEXITCODE -eq 0) {
+
+$savedErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    $versionOutput = & $installedExe version 2>&1
+    $versionExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+
+if ($versionExitCode -eq 0) {
     Write-Host $versionOutput
 } elseif ($AllowMissingVersion) {
     Write-Host "(version metadata not available in this release)"
