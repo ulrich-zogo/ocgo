@@ -52,6 +52,34 @@ Use:
 
 to skip PATH modification.
 
+## Test the installer from a local archive
+
+The PowerShell installer supports `-ArchivePath` to install from a local zip file without downloading from GitHub:
+
+```powershell
+.\scripts\install-windows.ps1 `
+  -ArchivePath .\dist\ocgo_0.1.0_windows_x86_64.zip `
+  -InstallDir $env:TEMP\ocgo-install-smoke `
+  -NoPath `
+  -Force
+```
+
+With `-DryRun`, the installer shows what it would do without modifying the system:
+
+```powershell
+.\scripts\install-windows.ps1 `
+  -ArchivePath .\dist\ocgo_0.1.0_windows_x86_64.zip `
+  -InstallDir $env:TEMP\ocgo-install-smoke `
+  -NoPath `
+  -DryRun
+```
+
+For a full Windows install smoke that also validates checksums, Scoop, and WinGet manifests:
+
+```powershell
+.\scripts\smoke-release-install.ps1 -Dist .\dist -Version "v0.1.0"
+```
+
 ## Scoop
 
 Future Scoop install path:
