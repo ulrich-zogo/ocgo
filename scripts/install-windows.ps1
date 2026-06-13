@@ -199,8 +199,12 @@ if ($LASTEXITCODE -eq 0) {
 } elseif ($AllowMissingVersion) {
     Write-Host "(version metadata not available in this release)"
 } else {
-    Write-Error "Installed ocgo.exe failed to report version."
-    exit 1
+    Write-Warning "Installed ocgo.exe did not report a version. The binary passed --help verification and is usable."
+    Write-Warning "This can happen when installing an older release that predates the version command."
+    if ($versionOutput) {
+        Write-Host "version command output:"
+        Write-Host $versionOutput
+    }
 }
 
 Write-Host ""
@@ -215,3 +219,5 @@ if (-not $NoPath) {
     Write-Host ""
     Write-Host "Open a new terminal if 'ocgo' is not immediately available."
 }
+
+exit 0

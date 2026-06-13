@@ -214,6 +214,21 @@ scripts/apply-main-branch-protection.sh
 
 See [docs/branch-protection.md](branch-protection.md) for details.
 
+## Windows installer warns that version is unavailable
+
+If the installer prints a warning that `ocgo.exe` did not report a version, but `--help` verification passed, the installation is still usable.
+
+This can happen when installing an older release that predates the `ocgo version` command.
+
+Verify manually:
+
+```powershell
+& "$env:LOCALAPPDATA\ocgo\bin\ocgo.exe" --help
+& "$env:LOCALAPPDATA\ocgo\bin\ocgo.exe" list
+```
+
+**Important:** A failing `--help` means the installation is invalid. A failing `version` is a non-blocking warning.
+
 ## `make` is not recognized on Windows
 
 If you see this in PowerShell:
