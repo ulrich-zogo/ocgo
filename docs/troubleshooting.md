@@ -214,6 +214,35 @@ scripts/apply-main-branch-protection.sh
 
 See [docs/branch-protection.md](branch-protection.md) for details.
 
+## `make` is not recognized on Windows
+
+If you see this in PowerShell:
+
+```text
+make: The term 'make' is not recognized as a name of a cmdlet, function, script file, or executable program.
+```
+
+you are using native Windows PowerShell without GNU Make installed.
+
+You do not need `make` to build OCGO from source on Windows. Use Go directly:
+
+```powershell
+New-Item -ItemType Directory -Force -Path .\bin
+go build -o .\bin\ocgo.exe .\cmd\ocgo
+.\bin\ocgo.exe --help
+```
+
+To install:
+
+```powershell
+go install .\cmd\ocgo
+& "$env:USERPROFILE\go\bin\ocgo.exe" --help
+```
+
+If you prefer to use `make`, use WSL, Git Bash, or install GNU Make separately. The native PowerShell path is the Go command path above.
+
+See [docs/windows.md](windows.md#build-from-source-on-windows).
+
 ## Reset OCGO safely
 
 ```bash
