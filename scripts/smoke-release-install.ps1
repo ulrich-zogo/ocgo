@@ -145,27 +145,35 @@ try {
             }
         }
 
+        function Invoke-Binary {
+            param([string]$exe, [string[]]$exeArgs)
+            $out = & $exe @exeArgs
+            $ec = $LASTEXITCODE
+            $text = $out -join "`n"
+            return ,$text, $ec
+        }
+
         Write-Host ""
         Write-Host "=== smoke: version ==="
-        $output = & $bin version 2>&1
-        if ($LASTEXITCODE -ne 0) { Write-Error "ERROR: version failed`n$output"; exit 1 }
+        $output, $ec = Invoke-Binary -exe $bin -exeArgs @("version")
+        if ($ec -ne 0) { Write-Error "ERROR: version failed`n$output"; exit 1 }
         Write-Host "  OK"
 
         Write-Host ""
         Write-Host "=== smoke: version --json ==="
-        $jsonOutput = & $bin version --json 2>&1
-        if ($LASTEXITCODE -ne 0) { Write-Error "ERROR: version --json failed`n$jsonOutput"; exit 1 }
+        $jsonOutput, $ec = Invoke-Binary -exe $bin -exeArgs @("version", "--json")
+        if ($ec -ne 0) { Write-Error "ERROR: version --json failed`n$jsonOutput"; exit 1 }
         Validate-Json $jsonOutput "version --json"
 
         Write-Host ""
         Write-Host "=== smoke: --help ==="
-        $helpOutput = & $bin --help 2>&1
+        $helpOutput, $ec = Invoke-Binary -exe $bin -exeArgs @("--help")
         Write-Host "  OK"
 
         Write-Host ""
         Write-Host "=== smoke: models ==="
-        $modelsOutput = & $bin models 2>&1
-        if ($LASTEXITCODE -ne 0) { Write-Error "ERROR: models failed`n$modelsOutput"; exit 1 }
+        $modelsOutput, $ec = Invoke-Binary -exe $bin -exeArgs @("models")
+        if ($ec -ne 0) { Write-Error "ERROR: models failed`n$modelsOutput"; exit 1 }
 
         $officialModels = @(
             "minimax-m3", "minimax-m2.7", "minimax-m2.5",
@@ -192,16 +200,15 @@ try {
 
         Write-Host ""
         Write-Host "=== smoke: doctor --json ==="
-        $doctorErr = Join-Path $tmpRoot "doctor-err.txt"
-        $doctorOutput = & $bin doctor --json 2>$doctorErr
-        $doctorExit = $LASTEXITCODE
+        $doctorOutput, $doctorExit = Invoke-Binary -exe $bin -exeArgs @("doctor", "--json")
         Validate-Json $doctorOutput "doctor --json"
         Write-Host "  doctor exit code: $doctorExit (non-zero is acceptable)"
 
         Write-Host ""
         Write-Host "=== smoke: install-windows.ps1 -DryRun ==="
         $installer = Join-Path $PSScriptRoot "install-windows.ps1"
-        $dryRunOutput = & $installer -ArchivePath $archive -InstallDir (Join-Path $tmpRoot "install-dry") -NoPath -DryRun 2>&1
+        $dryRunResult = & $installer -ArchivePath $archive -InstallDir (Join-Path $tmpRoot "install-dry") -NoPath -DryRun 2>&1
+        $dryRunOutput = $dryRunResult -join "`n"
         if ($LASTEXITCODE -ne 0) { Write-Error "ERROR: install-windows.ps1 -DryRun failed`n$dryRunOutput"; exit 1 }
         $dryInstallDir = Join-Path $tmpRoot "install-dry"
         if (Test-Path $dryInstallDir) {
@@ -213,7 +220,8 @@ try {
         Write-Host ""
         Write-Host "=== smoke: install-windows.ps1 -ArchivePath ==="
         $installDir = Join-Path $tmpRoot "install"
-        $installOutput = & $installer -ArchivePath $archive -InstallDir $installDir -NoPath -Force 2>&1
+        $installResult = & $installer -ArchivePath $archive -InstallDir $installDir -NoPath -Force 2>&1
+        $installOutput = $installResult -join "`n"
         if ($LASTEXITCODE -ne 0) { Write-Error "ERROR: install-windows.ps1 failed`n$installOutput"; exit 1 }
         $installedExe = Join-Path $installDir "ocgo.exe"
         if (-not (Test-Path $installedExe)) {
@@ -224,12 +232,12 @@ try {
 
         Write-Host ""
         Write-Host "=== smoke: installed binary ==="
-        $installedVersion = & $installedExe version 2>&1
-        if ($LASTEXITCODE -ne 0) { Write-Error "ERROR: installed version failed`n$installedVersion"; exit 1 }
+        $ivOut, $ivEc = Invoke-Binary -exe $installedExe -exeArgs @("version")
+        if ($ivEc -ne 0) { Write-Error "ERROR: installed version failed`n$ivOut"; exit 1 }
         Write-Host "  OK"
 
-        $installedHelp = & $installedExe --help 2>&1
-        if ($LASTEXITCODE -ne 0) { Write-Error "ERROR: installed --help failed`n$installedHelp"; exit 1 }
+        $ihOut, $ihEc = Invoke-Binary -exe $installedExe -exeArgs @("--help")
+        if ($ihEc -ne 0) { Write-Error "ERROR: installed --help failed`n$ihOut"; exit 1 }
         Write-Host "  Help OK"
 
     } finally {

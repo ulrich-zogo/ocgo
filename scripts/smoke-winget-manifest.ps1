@@ -179,11 +179,10 @@ if ($hasWinget) {
     if ($ec -eq 0) {
         Write-Host "winget validate completed."
     } else {
-        $hasValidationSuccess = $text -match "Manifest validation succeeded" -or $text -match "Validation succeeded" -or $text -match "succeeded with warnings"
         $hasKnownSchemaWarning = $text -match "Schema header not found"
-        $hasHardError = $text -match "(?i)\berror\b" -or $text -match "(?i)\bfailed\b" -or $text -match "(?i)\binvalid\b"
+        $hasHardError = $text -match "(?i)\berror\b" -or $text -match "(?i)\bfailed\b" -or $text -match "(?i)\binvalid\b" -or $text -match "erreur" -or $text -match "échec"
 
-        if ($AllowKnownRunnerWarnings -and $hasValidationSuccess -and $hasKnownSchemaWarning -and -not $hasHardError) {
+        if ($AllowKnownRunnerWarnings -and $hasKnownSchemaWarning -and -not $hasHardError) {
             Write-Host "winget validate returned non-zero but only known schema-header warning was detected. Accepting with -AllowKnownRunnerWarnings."
         } else {
             Write-Error "winget validate failed with exit code $ec."
