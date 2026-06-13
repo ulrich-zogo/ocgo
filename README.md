@@ -458,6 +458,29 @@ On Windows:
 
 See [docs/install-smoke.md](docs/install-smoke.md) for package manager smoke tests and detailed documentation.
 
+## Repository governance
+
+The canonical repository is:
+
+```text
+ulrich-zogo/ocgo
+```
+
+Repository governance, fork detachment, and branch protection are documented in:
+
+```text
+docs/repository-governance.md
+docs/branch-protection.md
+docs/github-support-unfork-request.md
+```
+
+Quick checks:
+
+```bash
+make check-repo-ownership
+make audit-repo-governance
+```
+
 ## E2E smoke tests
 
 Workflow smoke tests validate real user scenarios from fresh config through

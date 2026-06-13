@@ -1,0 +1,23 @@
+name: repository-governance
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+      - "docs/**"
+      - "scripts/check-repo-ownership.sh"
+      - "scripts/check-fork-ownership.sh"
+      - "Makefile"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ownership:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check repository ownership references
+        run: ./scripts/check-repo-ownership.sh

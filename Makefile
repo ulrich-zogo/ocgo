@@ -1,4 +1,4 @@
-.PHONY: build run test clean install release check-fork-ownership build-release update-homebrew-formula verify-release verify-homebrew-formula ci test-windows-installer validate-scoop-manifest validate-winget-manifests e2e-smoke real-daemon-smoke release-install-smoke release-install-smoke-build
+.PHONY: build run test clean install release check-fork-ownership check-repo-ownership build-release update-homebrew-formula verify-release verify-homebrew-formula ci test-windows-installer validate-scoop-manifest validate-winget-manifests e2e-smoke real-daemon-smoke release-install-smoke release-install-smoke-build audit-repo-governance apply-main-protection
 
 FORMULA_PATH ?= Formula/ocgo.rb
 
@@ -35,6 +35,18 @@ install: build
 
 check-fork-ownership:
 	./scripts/check-fork-ownership.sh
+
+.PHONY: check-repo-ownership
+check-repo-ownership:
+	./scripts/check-repo-ownership.sh
+
+.PHONY: audit-repo-governance
+audit-repo-governance:
+	./scripts/audit-repo-governance.sh
+
+.PHONY: apply-main-protection
+apply-main-protection:
+	./scripts/apply-main-branch-protection.sh
 
 release:
 	@[ -n "$(TAG)" ] || (echo "Usage: make release TAG=v0.1.0" && exit 1)
