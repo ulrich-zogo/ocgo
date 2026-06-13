@@ -245,3 +245,4 @@ try {
 Write-Host ""
 Write-Host "Results: $TestsPassed passed, $TestsFailed failed."
 if ($TestsFailed -gt 0) { exit 1 }
+exit 0
