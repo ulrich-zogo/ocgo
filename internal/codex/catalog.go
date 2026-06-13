@@ -2,18 +2,19 @@ package codex
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
-	"ocgo/internal/config"
 	"ocgo/internal/mapping"
 	"ocgo/internal/models"
 )
 
 func (m Manager) WriteModelCatalog() error {
-	if m.Paths.ModelCatalogFile == "" {
-		return writeModelCatalogTo(config.CodexModelCatalogFile())
+	if strings.TrimSpace(m.Paths.ModelCatalogFile) == "" {
+		return fmt.Errorf("codex model catalog path is required")
 	}
 	return writeModelCatalogTo(m.Paths.ModelCatalogFile)
 }
