@@ -1,6 +1,8 @@
 param(
     [string]$Version = "latest",
     [string]$InstallDir = "$env:LOCALAPPDATA\ocgo\bin",
+    [string]$ArchivePath = "",
+    [string]$DistDir = "",
     [switch]$NoPath,
     [switch]$Force,
     [switch]$DryRun,
@@ -25,71 +27,116 @@ if (-not $archMap.ContainsKey("$arch")) {
 }
 $archSuffix = $archMap["$arch"]
 
-if ($Version -eq "latest") {
-    $releaseUrl = "https://api.github.com/repos/ulrich-zogo/ocgo/releases/latest"
-    Write-Host "Fetching latest release from $releaseUrl ..."
-    $release = Invoke-RestMethod -Uri $releaseUrl -UseBasicParsing
-    $tag = $release.tag_name
-    Write-Host "Latest release tag: $tag"
+$usingArchive = [System.IO.File]::Exists($ArchivePath)
+
+if ($usingArchive) {
+    $zipPath = Resolve-Path -LiteralPath $ArchivePath
+    $zipName = Split-Path -Leaf $zipPath
+
+    Write-Host "Using local archive: $zipPath"
+
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] Would install from archive: $zipPath"
+        Write-Host "[DRY-RUN] Would install to: $InstallDir"
+        Write-Host "[DRY-RUN] Architecture: $archSuffix"
+        Write-Host "[DRY-RUN] No changes made."
+        exit 0
+    }
 } else {
-    $tag = if ($Version -match "^v") { $Version } else { "v$Version" }
-    $releaseUrl = "https://api.github.com/repos/ulrich-zogo/ocgo/releases/tags/$tag"
-    Write-Host "Fetching release $tag from $releaseUrl ..."
-    try {
+    if ($Version -eq "latest") {
+        $releaseUrl = "https://api.github.com/repos/ulrich-zogo/ocgo/releases/latest"
+        Write-Host "Fetching latest release from $releaseUrl ..."
         $release = Invoke-RestMethod -Uri $releaseUrl -UseBasicParsing
-    } catch {
-        Write-Error "Release $tag not found."
+        $tag = $release.tag_name
+        Write-Host "Latest release tag: $tag"
+    } else {
+        $tag = if ($Version -match "^v") { $Version } else { "v$Version" }
+        $releaseUrl = "https://api.github.com/repos/ulrich-zogo/ocgo/releases/tags/$tag"
+        Write-Host "Fetching release $tag from $releaseUrl ..."
+        try {
+            $release = Invoke-RestMethod -Uri $releaseUrl -UseBasicParsing
+        } catch {
+            Write-Error "Release $tag not found."
+            exit 1
+        }
+    }
+
+    $versionNumber = $tag -replace "^v", ""
+    $zipName = "ocgo_${versionNumber}_windows_${archSuffix}.zip"
+    $assetUrl = "https://github.com/ulrich-zogo/ocgo/releases/download/$tag/$zipName"
+    $checksumsUrl = "https://github.com/ulrich-zogo/ocgo/releases/download/$tag/checksums.txt"
+
+    $asset = $release.assets | Where-Object { $_.name -eq $zipName }
+    if (-not $asset) {
+        Write-Error "Asset $zipName not found in release $tag."
         exit 1
     }
-}
 
-$versionNumber = $tag -replace "^v", ""
-$zipName = "ocgo_${versionNumber}_windows_${archSuffix}.zip"
-$assetUrl = "https://github.com/ulrich-zogo/ocgo/releases/download/$tag/$zipName"
-$checksumsUrl = "https://github.com/ulrich-zogo/ocgo/releases/download/$tag/checksums.txt"
-
-$asset = $release.assets | Where-Object { $_.name -eq $zipName }
-if (-not $asset) {
-    Write-Error "Asset $zipName not found in release $tag."
-    exit 1
-}
-
-if ($DryRun) {
-    Write-Host "[DRY-RUN] Would download: $assetUrl"
-    Write-Host "[DRY-RUN] Would install to: $InstallDir"
-    Write-Host "[DRY-RUN] Architecture: $archSuffix"
-    Write-Host "[DRY-RUN] No changes made."
-    exit 0
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] Would download: $assetUrl"
+        Write-Host "[DRY-RUN] Would install to: $InstallDir"
+        Write-Host "[DRY-RUN] Architecture: $archSuffix"
+        Write-Host "[DRY-RUN] No changes made."
+        exit 0
+    }
 }
 
 $tempDir = Join-Path $env:TEMP ([System.Guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 try {
-    $zipPath = Join-Path $tempDir $zipName
-    $checksumsPath = Join-Path $tempDir "checksums.txt"
+    if (-not $usingArchive) {
+        $zipPath = Join-Path $tempDir $zipName
+        $checksumsPath = Join-Path $tempDir "checksums.txt"
 
-    Write-Host "Downloading $zipName ..."
-    Invoke-WebRequest -Uri $assetUrl -OutFile $zipPath -UseBasicParsing
+        Write-Host "Downloading $zipName ..."
+        Invoke-WebRequest -Uri $assetUrl -OutFile $zipPath -UseBasicParsing
 
-    Write-Host "Downloading checksums.txt ..."
-    Invoke-WebRequest -Uri $checksumsUrl -OutFile $checksumsPath -UseBasicParsing
+        Write-Host "Downloading checksums.txt ..."
+        Invoke-WebRequest -Uri $checksumsUrl -OutFile $checksumsPath -UseBasicParsing
 
-    $expectedLine = Get-Content $checksumsPath | Where-Object { $_ -match [regex]::Escape($zipName) }
-    if (-not $expectedLine) {
-        Write-Error "checksums.txt does not contain an entry for $zipName."
-        exit 1
+        $expectedLine = Get-Content $checksumsPath | Where-Object { $_ -match [regex]::Escape($zipName) }
+        if (-not $expectedLine) {
+            Write-Error "checksums.txt does not contain an entry for $zipName."
+            exit 1
+        }
+        $expectedHash = ($expectedLine -split "\s+")[0].ToLowerInvariant()
+
+        Write-Host "Verifying SHA256 checksum ..."
+        $actualHash = (Get-FileHash -Algorithm SHA256 $zipPath).Hash.ToLowerInvariant()
+        if ($actualHash -ne $expectedHash) {
+            Write-Error "SHA256 checksum mismatch for $zipName."
+            Write-Error "  Expected: $expectedHash"
+            Write-Error "  Actual:   $actualHash"
+            exit 1
+        }
+        Write-Host "Checksum verified."
+    } else {
+        $archiveDir = Split-Path -Parent $zipPath
+        $checksumsPath = Join-Path $archiveDir "checksums.txt"
+        if (-not (Test-Path $checksumsPath) -and $DistDir) {
+            $checksumsPath = Join-Path $DistDir "checksums.txt"
+        }
+
+        if (Test-Path $checksumsPath) {
+            Write-Host "Verifying SHA256 checksum from $checksumsPath ..."
+            $expectedLine = Get-Content $checksumsPath | Where-Object { $_ -match [regex]::Escape($zipName) }
+            if ($expectedLine) {
+                $expectedHash = ($expectedLine -split "\s+")[0].ToLowerInvariant()
+                $actualHash = (Get-FileHash -Algorithm SHA256 $zipPath).Hash.ToLowerInvariant()
+                if ($actualHash -ne $expectedHash) {
+                    Write-Error "SHA256 checksum mismatch for $zipName."
+                    Write-Error "  Expected: $expectedHash"
+                    Write-Error "  Actual:   $actualHash"
+                    exit 1
+                }
+                Write-Host "Checksum verified."
+            } else {
+                Write-Host "WARNING: checksums.txt does not contain an entry for $zipName. Skipping checksum verification."
+            }
+        } else {
+            Write-Host "WARNING: checksums.txt not found alongside archive. Skipping checksum verification."
+        }
     }
-    $expectedHash = ($expectedLine -split "\s+")[0].ToLowerInvariant()
-
-    Write-Host "Verifying SHA256 checksum ..."
-    $actualHash = (Get-FileHash -Algorithm SHA256 $zipPath).Hash.ToLowerInvariant()
-    if ($actualHash -ne $expectedHash) {
-        Write-Error "SHA256 checksum mismatch for $zipName."
-        Write-Error "  Expected: $expectedHash"
-        Write-Error "  Actual:   $actualHash"
-        exit 1
-    }
-    Write-Host "Checksum verified."
 
     Write-Host "Extracting $zipName ..."
     Expand-Archive -Path $zipPath -DestinationPath $tempDir
