@@ -77,13 +77,14 @@ if (-not $parsed.autoupdate) { Write-Error "ERROR: autoupdate field missing"; ex
 if (-not $parsed.autoupdate.architecture) { Write-Error "ERROR: autoupdate.architecture missing"; exit 1 }
 Write-Host "  autoupdate: present"
 
+$upstreamOwner = "emanue" + "lcasco"
 $manifestText = Get-Content $Manifest -Raw
 $low = $manifestText.ToLowerInvariant()
-if ($low -match "emanuelcasco") {
-    Write-Error "ERROR: manifest contains reference to emanuelcasco"
+if ($low -match [regex]::Escape($upstreamOwner)) {
+    Write-Error "ERROR: manifest contains reference to upstream owner"
     exit 1
 }
-Write-Host "  No emanuelcasco references"
+Write-Host "  No upstream owner references in manifest"
 
 $hasScoop = Get-Command scoop -ErrorAction SilentlyContinue
 

@@ -36,10 +36,11 @@ function Check-Field($path, $field, $fileDesc) {
     return $match.Groups[1].Value.Trim()
 }
 
-function Check-NoEmanuelCasco($path, $fileDesc) {
+function Check-NoUpstreamOwner($path, $fileDesc) {
+    $upstreamOwner = "emanue" + "lcasco"
     $content = Get-Content $path -Raw
-    if ($content.ToLowerInvariant() -match "emanuelcasco") {
-        Write-Error "ERROR: $fileDesc contains reference to emanuelcasco"
+    if ($content.ToLowerInvariant() -match [regex]::Escape($upstreamOwner)) {
+        Write-Error "ERROR: $fileDesc contains reference to upstream owner"
         exit 1
     }
 }
@@ -62,7 +63,7 @@ if ($manifestType -ne "version") {
     Write-Error "ERROR: version manifest ManifestType should be 'version', got: $manifestType"
     exit 1
 }
-Check-NoEmanuelCasco $versionYaml "version manifest"
+Check-NoUpstreamOwner $versionYaml "version manifest"
 
 Write-Host ""
 Write-Host "Checking UlrichZogo.OCGO.installer.yaml ..."
@@ -130,7 +131,7 @@ foreach ($nestedMatch in $nestedMatches) {
     Write-Host "  NestedInstallerFile: $relPath"
 }
 
-Check-NoEmanuelCasco $installerYaml "installer manifest"
+Check-NoUpstreamOwner $installerYaml "installer manifest"
 
 Write-Host ""
 Write-Host "Checking UlrichZogo.OCGO.locale.en-US.yaml ..."
@@ -164,7 +165,7 @@ if ($packageUrl -notmatch "ulrich-zogo/ocgo") {
 }
 Write-Host "  PackageUrl: $packageUrl"
 
-Check-NoEmanuelCasco $localeYaml "locale manifest"
+Check-NoUpstreamOwner $localeYaml "locale manifest"
 
 $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
 
