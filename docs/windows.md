@@ -1,10 +1,11 @@
 # Windows installation
 
-OCGO supports three Windows installation paths:
+OCGO supports four Windows installation or build paths:
 
 1. PowerShell installer
 2. Scoop
 3. WinGet
+4. Build from source with Go
 
 ## PowerShell installer
 
@@ -128,6 +129,50 @@ Or validate the manifests with a content check:
 ```powershell
 Get-ChildItem .\packaging\winget\manifests\u\UlrichZogo\OCGO\0.1.0 -Filter *.yaml | ForEach-Object { Write-Host "$($_.Name): $(Get-Content $_.FullName -Raw | Select-String -Pattern 'PackageIdentifier')" }
 ```
+
+## Build from source on Windows
+
+If you cloned the repository on Windows and are using PowerShell, you do not need `make`.
+
+```powershell
+git clone https://github.com/ulrich-zogo/ocgo.git
+cd ocgo
+go version
+New-Item -ItemType Directory -Force -Path .\bin
+go build -o .\bin\ocgo.exe .\cmd\ocgo
+.\bin\ocgo.exe --help
+```
+
+Install into your Go binary directory:
+
+```powershell
+go install .\cmd\ocgo
+& "$env:USERPROFILE\go\bin\ocgo.exe" --help
+```
+
+If `ocgo` is not found after `go install`, add your Go binary directory to the user `PATH`:
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:USERPROFILE\go\bin",
+  "User"
+)
+```
+
+Close and reopen PowerShell, then verify:
+
+```powershell
+ocgo --help
+ocgo version
+ocgo models
+```
+
+### Why not `make build`?
+
+`make` is not included in Windows PowerShell by default.
+
+The `Makefile` is still useful in Linux, macOS, WSL, Git Bash, or environments where GNU Make and Unix-like shell tools are available. In native PowerShell, use the Go commands above.
 
 ## Verify installation
 

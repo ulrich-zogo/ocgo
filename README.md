@@ -83,18 +83,61 @@ ocgo doctor codex
 
 ### Build from source
 
+Clone the repository:
+
 ```bash
 git clone https://github.com/ulrich-zogo/ocgo.git
 cd ocgo
-make build       # builds bin/ocgo
-make install     # installs to ~/go/bin
 ```
 
-The binary is built at `bin/ocgo`. `make install` copies it to `~/go/bin/ocgo`. Make sure `~/go/bin` is in your `PATH`:
+#### Linux, macOS, WSL, or Git Bash
 
 ```bash
-export PATH="$HOME/go/bin:$PATH"
+make build       # builds bin/ocgo
+make install     # installs to $(go env GOPATH)/bin or GOBIN
 ```
+
+Make sure your Go binary directory is in your `PATH`:
+
+```bash
+export PATH="$(go env GOPATH)/bin:$PATH"
+```
+
+#### Windows PowerShell
+
+PowerShell does not include `make` by default. Build directly with Go:
+
+```powershell
+New-Item -ItemType Directory -Force -Path .\bin
+go build -o .\bin\ocgo.exe .\cmd\ocgo
+.\bin\ocgo.exe --help
+```
+
+Install into your Go binary directory:
+
+```powershell
+go install .\cmd\ocgo
+& "$env:USERPROFILE\go\bin\ocgo.exe" --help
+```
+
+If `ocgo` is not found after `go install`, add your Go binary directory to the user `PATH`:
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:USERPROFILE\go\bin",
+  "User"
+)
+```
+
+Then close and reopen PowerShell:
+
+```powershell
+ocgo --help
+ocgo version
+```
+
+See [docs/windows.md](docs/windows.md) for Windows-specific installation and source-build instructions.
 
 ### Homebrew
 
@@ -566,12 +609,24 @@ See [docs/troubleshooting.md](docs/troubleshooting.md) for detailed troubleshoot
 
 ### Build
 
+Linux, macOS, WSL, or Git Bash:
+
 ```bash
-make build       # bin/ocgo
-make install     # ~/go/bin/ocgo
+make build       # bin/ocgo or bin/ocgo.exe depending on GOOS
+make install     # installs to $(go env GOPATH)/bin or GOBIN
 make test
 make run
 make clean
+```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force -Path .\bin
+go build -o .\bin\ocgo.exe .\cmd\ocgo
+go test ./...
+go run .\cmd\ocgo
+Remove-Item -Recurse -Force .\bin, .\dist -ErrorAction SilentlyContinue
 ```
 
 ### Prerequisites
@@ -579,12 +634,25 @@ make clean
 - Go 1.22+
 - A valid OpenCode Go API key for testing
 
+Linux, macOS, WSL, or Git Bash:
+
 ```bash
 git clone https://github.com/ulrich-zogo/ocgo.git
 cd ocgo
 go mod download
 make build
 bin/ocgo setup
+```
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/ulrich-zogo/ocgo.git
+cd ocgo
+go mod download
+New-Item -ItemType Directory -Force -Path .\bin
+go build -o .\bin\ocgo.exe .\cmd\ocgo
+.\bin\ocgo.exe setup
 ```
 
 ### Release
