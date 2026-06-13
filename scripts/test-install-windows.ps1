@@ -20,6 +20,27 @@ function Output-Matches {
     return $false
 }
 
+function Invoke-Installer {
+    param([string[]]$Arguments)
+
+    # Isolate from $ErrorActionPreference = "Stop": *>&1 on a native command
+    # wraps stderr as ErrorRecord objects, which become terminating errors
+    # when $ErrorActionPreference is "Stop".
+    $savedEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & powershell -ExecutionPolicy Bypass -File $InstallerPath @Arguments *>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedEAP
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output   = $output
+    }
+}
+
 function New-MockOcgoArchive {
     param(
         [int]$ExitCodeHelp = 0,
@@ -126,11 +147,10 @@ try {
             New-Item -ItemType Directory -Path $testDir -Force | Out-Null
             $zip = New-MockOcgoArchive -ExitCodeHelp 0 -ExitCodeVersion 0 -TempDir $testDir
             $installDir = Join-Path $testDir "inst"
-            $output = & $InstallerPath -ArchivePath $zip -InstallDir $installDir -NoPath -Force *>&1
-            $ec = $LASTEXITCODE
-            if ($ec -ne 0) { throw "Expected exit 0, got $ec" }
-            if (-not (Output-Matches $output "ocgo mock version v0.0.0-test")) { throw "Version output not found" }
-            if (-not (Output-Matches $output "OCGO installed successfully")) { throw "Success message not found" }
+            $result = Invoke-Installer -Arguments @("-ArchivePath", $zip, "-InstallDir", $installDir, "-NoPath", "-Force")
+            if ($result.ExitCode -ne 0) { throw "Expected exit 0, got $($result.ExitCode)" }
+            if (-not (Output-Matches $result.Output "ocgo mock version v0.0.0-test")) { throw "Version output not found" }
+            if (-not (Output-Matches $result.Output "OCGO installed successfully")) { throw "Success message not found" }
             if (-not (Test-Path (Join-Path $installDir "ocgo.exe"))) { throw "ocgo.exe not installed" }
         }
     }
@@ -142,11 +162,10 @@ try {
             New-Item -ItemType Directory -Path $testDir -Force | Out-Null
             $zip = New-MockOcgoArchive -ExitCodeHelp 0 -ExitCodeVersion 1 -TempDir $testDir
             $installDir = Join-Path $testDir "inst"
-            $output = & $InstallerPath -ArchivePath $zip -InstallDir $installDir -NoPath -Force *>&1
-            $ec = $LASTEXITCODE
-            if ($ec -ne 0) { throw "Expected exit 0, got $ec" }
-            if (-not (Output-Matches $output "did not report a version")) { throw "Warning about missing version not found" }
-            if (-not (Output-Matches $output "OCGO installed successfully")) { throw "Success message not found" }
+            $result = Invoke-Installer -Arguments @("-ArchivePath", $zip, "-InstallDir", $installDir, "-NoPath", "-Force")
+            if ($result.ExitCode -ne 0) { throw "Expected exit 0, got $($result.ExitCode)" }
+            if (-not (Output-Matches $result.Output "did not report a version")) { throw "Warning about missing version not found" }
+            if (-not (Output-Matches $result.Output "OCGO installed successfully")) { throw "Success message not found" }
             if (-not (Test-Path (Join-Path $installDir "ocgo.exe"))) { throw "ocgo.exe not installed" }
         }
     }
@@ -158,11 +177,11 @@ try {
             New-Item -ItemType Directory -Path $testDir -Force | Out-Null
             $zip = New-MockOcgoArchive -ExitCodeHelp 0 -ExitCodeVersion 1 -TempDir $testDir
             $installDir = Join-Path $testDir "inst"
-            $output = & $InstallerPath -ArchivePath $zip -InstallDir $installDir -NoPath -Force -AllowMissingVersion *>&1
-            $ec = $LASTEXITCODE
-            if ($ec -ne 0) { throw "Expected exit 0, got $ec" }
-            if (-not (Output-Matches $output "version metadata not available in this release")) { throw "AllowMissingVersion message not found" }
-            if (-not (Output-Matches $output "OCGO installed successfully")) { throw "Success message not found" }
+            $result = Invoke-Installer -Arguments @("-ArchivePath", $zip, 
+"-InstallDir", $installDir, "-NoPath", "-Force", "-AllowMissingVersion")
+            if ($result.ExitCode -ne 0) { throw "Expected exit 0, got $($result.ExitCode)" }
+            if (-not (Output-Matches $result.Output "version metadata not available in this release")) { throw "AllowMissingVersion message not found" }
+            if (-not (Output-Matches $result.Output "OCGO installed successfully")) { throw "Success message not found" }
             if (-not (Test-Path (Join-Path $installDir "ocgo.exe"))) { throw "ocgo.exe not installed" }
         }
     }
@@ -174,18 +193,10 @@ try {
             New-Item -ItemType Directory -Path $testDir -Force | Out-Null
             $zip = New-MockOcgoArchive -ExitCodeHelp 1 -ExitCodeVersion 1 -TempDir $testDir
             $installDir = Join-Path $testDir "inst"
-            $output = @()
-            $ec = -1
-            try {
-                $output = & $InstallerPath -ArchivePath $zip -InstallDir $installDir -NoPath -Force *>&1
-                $ec = $LASTEXITCODE
-            } catch {
-                $ec = 1
-                if (-not $output -or $output.Count -eq 0) { $output = @("$($_.Exception.Message)") }
-            }
-            if ($ec -eq 0) { throw "Expected non-zero exit, got 0" }
-            if (-not (Output-Matches $output "failed to run with --help")) { throw "Help failure message not found" }
-            if (Output-Matches $output "OCGO installed successfully") { throw "Unexpected success message" }
+            $result = Invoke-Installer -Arguments @("-ArchivePath", $zip, "-InstallDir", $installDir, "-NoPath", "-Force")
+            if ($result.ExitCode -eq 0) { throw "Expected non-zero exit, got 0" }
+            if (-not (Output-Matches $result.Output "failed to run with --help")) { throw "Help failure message not found" }
+            if (Output-Matches $result.Output "OCGO installed successfully") { throw "Unexpected success message" }
         }
     }
 
@@ -200,18 +211,11 @@ try {
             $badZip = Join-Path $testDir "bad-archive.zip"
             Compress-Archive -Path (Join-Path $dummyDir "*") -DestinationPath $badZip -Force
             $installDir = Join-Path $testDir "inst"
-            $output = @()
-            $ec = -1
-            try {
-                $output = & $InstallerPath -ArchivePath $badZip -InstallDir $installDir -NoPath -Force *>&1
-                $ec = $LASTEXITCODE
-            } catch {
-                $ec = 1
-                if (-not $output -or $output.Count -eq 0) { $output = @("$($_.Exception.Message)") }
-            }
-            if ($ec -eq 0) { throw "Expected non-zero exit, got 0" }
-            if (-not (Output-Matches $output "not found after extraction")) { throw "Binary not found message expected" }
-            if (Output-Matches $output "OCGO installed successfully") { throw "Unexpected success message" }
+            $result = Invoke-Installer -Arguments @("-ArchivePath", $badZip, 
+"-InstallDir", $installDir, "-NoPath", "-Force")
+            if ($result.ExitCode -eq 0) { throw "Expected non-zero exit, got 0" }
+            if (-not (Output-Matches $result.Output "not found after extraction")) { throw "Binary not found message expected" }
+            if (Output-Matches $result.Output "OCGO installed successfully") { throw "Unexpected success message" }
         }
     }
 
@@ -223,15 +227,9 @@ try {
         Run-Test "6/6 Network install" {
             $networkDir = Join-Path $TempRoot "test-network"
             New-Item -ItemType Directory -Path $networkDir -Force | Out-Null
-            $output = @()
-            try {
-                $output = & $InstallerPath -InstallDir $networkDir -NoPath -Force *>&1
-                $ec = $LASTEXITCODE
-            } catch {
-                $ec = 1
-                if (-not $output -or $output.Count -eq 0) { $output = @("$($_.Exception.Message)") }
-            }
-            if ($ec -ne 0) { throw "Network install failed with exit $ec" }
+            $result = Invoke-Installer -Arguments @("-InstallDir", $networkDir, 
+"-NoPath", "-Force")
+            if ($result.ExitCode -ne 0) { throw "Network install failed with exit $($result.ExitCode)" }
             $exePath = Join-Path $networkDir "ocgo.exe"
             if (-not (Test-Path $exePath)) { throw "ocgo.exe not found after network install" }
             $helpOut = & $exePath --help 2>&1
