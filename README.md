@@ -441,6 +441,23 @@ Exit codes:
 - `ocgo doctor --json` may return `1` when at least one check is in error
   (JSON output is still valid)
 
+## Installation smoke tests
+
+To validate local release artifacts before publishing:
+
+```bash
+scripts/build-release-artifacts.sh v0.0.0-smoke
+scripts/smoke-release-install.sh --dist dist --version v0.0.0-smoke
+```
+
+On Windows:
+
+```powershell
+.\scripts\smoke-release-install.ps1 -Dist .\dist -Version "v0.0.0-smoke"
+```
+
+See [docs/install-smoke.md](docs/install-smoke.md) for package manager smoke tests and detailed documentation.
+
 ## E2E smoke tests
 
 Workflow smoke tests validate real user scenarios from fresh config through

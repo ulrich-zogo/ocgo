@@ -51,6 +51,23 @@ TAG=v0.2.0 make release
 
 Requires `gh` (GitHub CLI) authenticated and Go installed.
 
+## Pre-release install smoke
+
+Before publishing a release, build local artifacts and run the install smoke test:
+
+```bash
+scripts/build-release-artifacts.sh vX.Y.Z
+scripts/smoke-release-install.sh --dist dist --version vX.Y.Z
+```
+
+On Windows, validate the Windows archive and installer:
+
+```powershell
+.\scripts\smoke-release-install.ps1 -Dist .\dist -Version "vX.Y.Z"
+```
+
+This validates checksums, archive extraction, binary execution, JSON diagnostic output, and the official model list.
+
 ## Build artifacts locally (without publishing)
 
 ```bash

@@ -62,6 +62,16 @@ The token must have write access to `ulrich-zogo/homebrew-tap`.
 
 See [docs/release.md](release.md) for the full release process.
 
+## Local release artifact smoke
+
+Before publishing a release, validate the local archive with:
+
+```bash
+scripts/smoke-release-install.sh --dist dist --version vX.Y.Z
+```
+
+This validates checksums, archive extraction, binary execution, and diagnostic commands without depending on the Homebrew tap or a published release.
+
 ## Smoke testing
 
 The Homebrew install path is validated by:
