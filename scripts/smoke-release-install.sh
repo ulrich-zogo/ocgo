@@ -42,11 +42,20 @@ esac
 
 echo "Platform: ${OS_LOOKUP}/${ARCH_LOOKUP}"
 
+case "$ARCH_LOOKUP" in
+  x86_64)
+    ARCH_ALIASES=("x86_64" "amd64")
+    ;;
+  arm64)
+    ARCH_ALIASES=("arm64" "ARM64" "aarch64")
+    ;;
+esac
+
 ARCHIVE_PATTERNS=()
 if [[ "$OS_LOOKUP" == "darwin" || "$OS_LOOKUP" == "linux" ]]; then
   EXT="tar.gz"
   for os_var in "$OS_LOOKUP" "$(echo "$OS_LOOKUP" | sed 's/.*/\u&/')"; do
-    for arch_var in "$ARCH_LOOKUP" "amd64" "ARM64"; do
+    for arch_var in "${ARCH_ALIASES[@]}"; do
       if [[ -n "$VERSION" ]]; then
         ARCHIVE_PATTERNS+=("${APP_NAME}_${VERSION#v}_${os_var}_${arch_var}.${EXT}")
       else
@@ -101,8 +110,25 @@ if [[ ! -f "$DIST_DIR/checksums.txt" ]]; then
   exit 1
 fi
 
+verify_checksums() {
+  local dir="$1"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$dir" && sha256sum -c checksums.txt)
+    return
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    (cd "$dir" && shasum -a 256 -c checksums.txt)
+    return
+  fi
+
+  echo "ERROR: neither sha256sum nor shasum is available" >&2
+  exit 1
+}
+
 echo "Verifying checksums ..."
-(cd "$DIST_DIR" && shasum -a 256 -c checksums.txt)
+verify_checksums "$DIST_DIR"
 
 TMP_DIR="$(mktemp -d)"
 if [[ -z "$KEEP_TEMP" ]]; then
