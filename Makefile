@@ -1,4 +1,4 @@
-.PHONY: build run test clean install release check-fork-ownership build-release update-homebrew-formula verify-release verify-homebrew-formula ci test-windows-installer validate-scoop-manifest validate-winget-manifests e2e-smoke
+.PHONY: build run test clean install release check-fork-ownership build-release update-homebrew-formula verify-release verify-homebrew-formula ci test-windows-installer validate-scoop-manifest validate-winget-manifests e2e-smoke real-daemon-smoke release-install-smoke release-install-smoke-build
 
 FORMULA_PATH ?= Formula/ocgo.rb
 
@@ -71,3 +71,12 @@ e2e-smoke:
 .PHONY: real-daemon-smoke
 real-daemon-smoke:
 	OCGO_E2E_REAL_DAEMON=1 go test ./internal/e2e -run RealDaemon -v
+
+.PHONY: release-install-smoke
+release-install-smoke:
+	./scripts/smoke-release-install.sh --dist dist
+
+.PHONY: release-install-smoke-build
+release-install-smoke-build:
+	./scripts/build-release-artifacts.sh v0.0.0-smoke
+	./scripts/smoke-release-install.sh --dist dist --version v0.0.0-smoke
